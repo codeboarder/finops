@@ -229,11 +229,6 @@ npm run build
 # Deploy dist/ folder to your hosting provider
 ```
 
-## Live Demo
-
-- **Frontend**: https://azure-finops-dashboard-a0hhfxn2.devinapps.com
-- **Backend**: https://app-zazrvcdk.fly.dev/
-
 ## Technology Stack
 
 - **Frontend**: React 18, TypeScript, Tailwind CSS, shadcn/ui, Recharts, Sonner
