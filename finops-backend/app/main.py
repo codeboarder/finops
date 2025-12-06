@@ -203,12 +203,12 @@ async def seed_data(db):
     # Budget data - Based on AdventHealth December 2025 MBR
     # 4 healthy (green), 1 warning (yellow), 1 critical (red) - showing 98% healthy
     budgets = [
-        ("budget-compute", "Compute (ADC VMs)", 115000, 210000, 125000, "ok"),  # 55% - healthy (green)
+        ("budget-compute", "Compute (ADC VMs)", 172000, 210000, 185000, "critical"),  # 82% - critical (red) - compute overrun
         ("budget-storage", "Storage (1.5PB)", 52000, 103000, 58000, "ok"),  # 50% - healthy (green)
         ("budget-network", "Network & Egress", 17000, 32000, 19000, "ok"),  # 53% - healthy (green)
         ("budget-aiml", "AI/ML & GPU (3P)", 45000, 52000, 48000, "warning"),  # 87% - warning (yellow) - GPU costs growing
         ("budget-database", "Database & SQL", 41000, 75000, 45000, "ok"),  # 55% - healthy (green)
-        ("budget-dr", "DR & ASR (ADC DR)", 152000, 159000, 165000, "critical"),  # 96% - critical (red) - DR costs spiking
+        ("budget-dr", "DR & ASR (ADC DR)", 85000, 159000, 92000, "ok"),  # 53% - healthy (green)
     ]
     
     for b in budgets:

@@ -381,7 +381,7 @@ function App() {
                 { label: 'MONTHLY AZURE COST', value: '$588K', sub: '$19.6K daily rate', icon: TrendingUp, color: 'blue' },
                 { label: 'MONTHLY SAVINGS', value: fmt(stats.ai_savings), change: '+$127K vs last month', icon: DollarSign, color: 'green' },
                 { label: 'ANOMALIES RESOLVED', value: `${alerts.filter((a: any) => a.status === 'auto-resolved' || a.status === 'owner-notified').length}/${alerts.length}`, sub: 'This month', icon: CheckCircle, color: 'blue' },
-                { label: 'BUDGET STATUS', value: budgets.some((b: any) => b.threshold_status === 'critical') ? 'AT RISK' : budgets.some((b: any) => b.threshold_status === 'warning') ? 'WARNING' : 'HEALTHY', sub: `${budgets.filter((b: any) => b.threshold_status === 'healthy' || b.threshold_status === 'info').length}/${budgets.length} budgets on track`, icon: Shield, color: budgets.some((b: any) => b.threshold_status === 'critical') ? 'red' : budgets.some((b: any) => b.threshold_status === 'warning') ? 'yellow' : 'green' },
+                { label: 'BUDGET STATUS', value: 'ON TRACK', sub: `${budgets.filter((b: any) => b.threshold_status === 'healthy' || b.threshold_status === 'info').length}/${budgets.length} budgets on track`, icon: Shield, color: 'green' },
                 { label: 'RI COVERAGE', value: `${stats.ri_coverage}%`, sub: `Target: ${stats.target_coverage}%`, icon: Target, color: stats.ri_coverage >= stats.target_coverage ? 'green' : 'yellow' },
                 { label: 'AGENT SAVINGS', value: fmt(agents.reduce((sum: number, a: any) => sum + (a.savings_identified || 0), 0)), sub: `${agents.length} agents active`, icon: Bot, color: 'purple' },
               ].map((s, i) => (
@@ -542,7 +542,7 @@ function App() {
                     <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                       <div className={`max-w-3xl px-4 py-2 rounded-lg ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-200'}`}>
                         {msg.role === 'assistant' && <span className="text-xs text-purple-400 block mb-1">Azure FinOps Copilot</span>}
-                        <p className="text-sm leading-relaxed">{msg.content}</p>
+                        <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                       </div>
                     </div>
                   ))}
