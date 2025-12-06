@@ -1,0 +1,1203 @@
+import { useState, useEffect, useCallback } from 'react'
+import './App.css'
+import { 
+  Activity, TrendingUp, Shield, Zap, AlertTriangle, CheckCircle, 
+  DollarSign, Bot, Target, Brain, Sparkles, 
+  Search, Bell, RefreshCw, Settings,
+  Cloud, Layers, Lock, Key, Globe, Server,
+  Power, Sliders, MessageSquare, Send, X, Save, Play, Loader2
+} from 'lucide-react'
+import { 
+  Line, AreaChart, Area, BarChart, Bar, 
+  XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ComposedChart
+} from 'recharts'
+import { Toaster, toast } from 'sonner'
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+
+function App() {
+  const [activeTab, setActiveTab] = useState('exec')
+  const [stats, setStats] = useState<any>(null)
+  const [agents, setAgents] = useState<any[]>([])
+  const [hiddenCosts, setHiddenCosts] = useState<any>(null)
+  const [budgets, setBudgets] = useState<any[]>([])
+  const [recommendations, setRecommendations] = useState<any[]>([])
+  const [controls, setControls] = useState<any[]>([])
+  const [alertConfigs, setAlertConfigs] = useState<any[]>([])
+  const [missionCritical, setMissionCritical] = useState<any[]>([])
+  const [alerts, setAlerts] = useState<any[]>([])
+  const [anomalyData, setAnomalyData] = useState<any[]>([])
+  const [varianceData, setVarianceData] = useState<any[]>([])
+  const [forecast, setForecast] = useState<any[]>([])
+  const [currentTime, setCurrentTime] = useState(new Date())
+  const [chatMessages, setChatMessages] = useState<any[]>([
+    { role: 'assistant', content: "I'm your FinOps AI Assistant. Ask me about costs, recommendations, or anomalies." }
+  ])
+    const [chatInput, setChatInput] = useState('')
+    const [chatOpen, setChatOpen] = useState(false)
+    const [isLive, setIsLive] = useState(true)
+    const [azureConfig, setAzureConfig] = useState({ tenant_id: '', client_id: '', client_secret: '', subscription_id: '' })
+    const [azureStatus, setAzureStatus] = useState<any>(null)
+    const [controlSettings, setControlSettings] = useState<any>({})
+    const [circuitBreakers, setCircuitBreakers] = useState<any>({})
+    const [isConnecting, setIsConnecting] = useState(false)
+    const [isDiscovering, setIsDiscovering] = useState(false)
+    const [discoveryResult, setDiscoveryResult] = useState<any>(null)
+    const [selectedAlert, setSelectedAlert] = useState<any>(null)
+    const [alertModalOpen, setAlertModalOpen] = useState(false)
+    const [workflowStep, setWorkflowStep] = useState(0)
+    const [investigationRunning, setInvestigationRunning] = useState(false)
+    const [emailStage, setEmailStage] = useState<'idle' | 'preview' | 'sent'>('idle')
+
+    const fetchData = useCallback(async () => {
+      try {
+        const endpoints = ['stats', 'agents', 'hidden-costs', 'budgets', 'recommendations', 'controls', 'alert-config', 'mission-critical', 'alerts', 'anomaly-data', 'variance-data', 'forecast', 'azure-config', 'control-settings', 'circuit-breakers']
+        const results = await Promise.all(endpoints.map(e => fetch(`${API_URL}/api/${e}`).then(r => r.json()).catch(() => null)))
+      
+        if (results[0]) setStats(results[0])
+        if (results[1]) setAgents(results[1])
+        if (results[2]) setHiddenCosts(results[2])
+        if (results[3]) setBudgets(results[3])
+        if (results[4]) setRecommendations(results[4])
+        if (results[5]) setControls(results[5])
+        if (results[6]) setAlertConfigs(results[6])
+        if (results[7]) setMissionCritical(results[7])
+        if (results[8]) setAlerts(results[8])
+        if (results[9]) setAnomalyData(results[9])
+        if (results[10]) setVarianceData(results[10])
+        if (results[11]) setForecast(results[11])
+        if (results[12]) setAzureStatus(results[12])
+        if (results[13]) setControlSettings(results[13])
+        if (results[14]) setCircuitBreakers(results[14])
+      } catch (e) { console.error(e) }
+    }, [])
+
+  const simulateTick = useCallback(async () => {
+    if (!isLive) return
+    try {
+      await fetch(`${API_URL}/api/simulate-tick`, { method: 'POST' })
+      const res = await fetch(`${API_URL}/api/anomaly-data`)
+      setAnomalyData(await res.json())
+    } catch (e) { console.error(e) }
+  }, [isLive])
+
+    const showAlertToast = (alert: any) => {
+      const severityColors = alert.severity === 'critical' 
+        ? 'border-red-500/40 bg-red-500/10' 
+        : alert.severity === 'high' 
+        ? 'border-yellow-500/40 bg-yellow-500/10' 
+        : 'border-blue-500/40 bg-blue-500/10'
+      const iconColor = alert.severity === 'critical' ? 'text-red-400' : alert.severity === 'high' ? 'text-yellow-400' : 'text-blue-400'
+      
+      toast.custom((id) => (
+        <button
+          onClick={() => {
+            openAlertWorkflow(alert)
+            toast.dismiss(id)
+          }}
+          className={`flex w-full items-start gap-3 rounded-lg border px-4 py-3 text-left hover:bg-slate-700 transition-colors cursor-pointer ${severityColors}`}
+        >
+          <AlertTriangle className={`mt-0.5 h-4 w-4 flex-shrink-0 ${iconColor}`} />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-white">{alert.message}</p>
+            <p className="text-xs text-slate-400">{alert.resource} | {alert.delta}</p>
+          </div>
+          <span className="text-xs text-slate-500 whitespace-nowrap">Click to investigate</span>
+        </button>
+      ), { duration: 8000 })
+    }
+
+    const generateDemoAlert = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/alerts/generate-demo`, { method: 'POST' })
+        const newAlert = await res.json()
+        setAlerts(prev => [newAlert, ...prev])
+        showAlertToast(newAlert)
+      } catch (e) { console.error(e) }
+    }
+
+  const handleChat = async () => {
+    if (!chatInput.trim()) return
+    const msg = chatInput
+    setChatMessages(prev => [...prev, { role: 'user', content: msg }])
+    setChatInput('')
+    try {
+      const res = await fetch(`${API_URL}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg }) })
+      const data = await res.json()
+      setChatMessages(prev => [...prev, { role: 'assistant', content: data.response }])
+    } catch (e) {
+      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Error connecting to AI.' }])
+    }
+  }
+
+  useEffect(() => {
+    fetchData()
+    const d = setInterval(fetchData, 30000)
+    const t = setInterval(simulateTick, 3000)
+    const c = setInterval(() => setCurrentTime(new Date()), 1000)
+    const a = setTimeout(generateDemoAlert, 5000)
+    const alertInterval = setInterval(generateDemoAlert, 60000) // Generate alert every 60 seconds
+    return () => { clearInterval(d); clearInterval(t); clearInterval(c); clearTimeout(a); clearInterval(alertInterval) }
+  }, [fetchData, simulateTick])
+
+  const openAlertWorkflow = (alert: any) => {
+    setSelectedAlert(alert)
+    setAlertModalOpen(true)
+    setWorkflowStep(0)
+    setInvestigationRunning(false)
+    setEmailStage('idle')
+  }
+
+  const getRecommendationsForAlert = (alert: any) => {
+    const msg = (alert?.message || '').toLowerCase()
+    const resource = (alert?.resource || '').toLowerCase()
+    
+    if (resource.includes('gpu') || msg.includes('gpu')) {
+      return [
+        { title: 'Scale down GPU node pool or pause training job', action: 'Scale Down' },
+        { title: 'Enable GPU Burst Shield circuit breaker', action: 'Enable Shield' },
+        { title: 'Move workloads to off-peak training window (nights/weekends)', action: 'Schedule' },
+        { title: 'Review batch job configuration for cost optimization', action: 'Review' },
+      ]
+    }
+    if (msg.includes('egress') || resource.includes('storage') || msg.includes('storage')) {
+      return [
+        { title: 'Review recent data export jobs and cross-region transfers', action: 'Audit' },
+        { title: 'Enable Azure Storage lifecycle rules for cold data', action: 'Configure' },
+        { title: 'Consider Private Endpoints to reduce egress costs', action: 'Implement' },
+        { title: 'Set up egress monitoring alerts', action: 'Monitor' },
+      ]
+    }
+    if (msg.includes('underutilized') || msg.includes('right-sizing') || (alert?.delta || '').toString().startsWith('-')) {
+      return [
+        { title: 'Downsize VM SKU to match actual utilization', action: 'Resize' },
+        { title: 'Schedule auto-shutdown for non-production hours', action: 'Schedule' },
+        { title: 'Move to B-series burstable instances', action: 'Migrate' },
+        { title: 'Review 30-day CPU/memory metrics', action: 'Analyze' },
+      ]
+    }
+    if (msg.includes('ri') || msg.includes('savings') || msg.includes('commitment')) {
+      return [
+        { title: 'Purchase 1-year or 3-year RI based on stability', action: 'Purchase RI' },
+        { title: 'Target 60-70% RI coverage per best practices', action: 'Plan' },
+        { title: 'Validate with Recommendation Validator agent', action: 'Validate' },
+        { title: 'Review instance flexibility options', action: 'Review' },
+      ]
+    }
+    return [
+      { title: 'Review 30-day cost trend in Cost Management', action: 'Analyze' },
+      { title: 'Check Azure Advisor recommendations', action: 'Review' },
+      { title: 'Verify resource tagging and cost center', action: 'Tag' },
+      { title: 'Assess business criticality level', action: 'Assess' },
+    ]
+  }
+
+  const getOwnerEmail = (alert: any) => {
+    const resource = (alert?.resource || 'unknown').toLowerCase().replace(/[^a-z0-9]/g, '-')
+    return `${resource}-owner@adventhealth.org`
+  }
+
+  const handleAlertAction = async (action: string) => {
+    if (!selectedAlert) return
+    
+    if (action === 'investigate') {
+      setAlerts(prev => prev.map(a => a.id === selectedAlert.id ? { ...a, status: 'investigating' } : a))
+      setInvestigationRunning(true)
+      setWorkflowStep(1)
+      toast.info('Investigation started', { description: 'Cost Sentinel + Validator agents assigned' })
+      
+      // Simulate async step progression
+      setTimeout(() => setWorkflowStep(2), 1500)
+      setTimeout(() => setWorkflowStep(3), 3000)
+      setTimeout(() => {
+        setWorkflowStep(4)
+        setInvestigationRunning(false)
+        toast.success('Investigation complete', { description: 'Recommendations ready - review actions below' })
+      }, 4500)
+      return
+    }
+    
+    if (action === 'notify') {
+      setEmailStage('preview')
+      return
+    }
+    
+    if (action === 'send-email') {
+      setEmailStage('sent')
+      setAlerts(prev => prev.map(a => a.id === selectedAlert.id ? { ...a, status: 'owner-notified' } : a))
+      toast.success('Email sent to resource owner (simulated)', { description: getOwnerEmail(selectedAlert) })
+      return
+    }
+
+    const actionMessages: any = {
+      acknowledge: 'Alert acknowledged - Added to tracking queue',
+      remediate: 'Auto-remediation triggered - Circuit breaker activated',
+      dismiss: 'Alert dismissed - Marked as false positive',
+      escalate: 'Escalated to FinOps team via PagerDuty'
+    }
+    toast.success(actionMessages[action] || 'Action completed', { description: selectedAlert.resource })
+    setAlerts(prev => prev.map(a => a.id === selectedAlert.id ? { ...a, status: action === 'dismiss' ? 'dismissed' : action === 'remediate' ? 'auto-resolved' : 'investigating' } : a))
+    setAlertModalOpen(false)
+    setSelectedAlert(null)
+  }
+
+    const tabs = [
+      { id: 'exec', label: 'Executive Summary', icon: TrendingUp },
+      { id: 'command', label: 'Command Center', icon: Activity },
+      { id: 'agents', label: 'AI Agents', icon: Bot },
+      { id: 'hidden', label: 'Hidden Cost Hunter', icon: Search },
+      { id: 'budget', label: 'Budget Guardrails', icon: Shield },
+      { id: 'risp', label: 'RI/SP Optimizer', icon: Target },
+      { id: 'controls', label: 'Controls & Alerts', icon: Sliders },
+      { id: 'mission', label: 'Mission Critical', icon: Lock },
+      { id: 'settings', label: 'Settings', icon: Settings },
+    ]
+
+    const [execChatMessages, setExecChatMessages] = useState<any[]>([
+      { role: 'assistant', content: "Welcome to the Executive Summary. I have access to your Azure subscription data and can answer questions about costs, anomalies, savings opportunities, and budget status. What would you like to know?" }
+    ])
+    const [execChatInput, setExecChatInput] = useState('')
+        const [selectedAgent, setSelectedAgent] = useState('gpt5')
+        const availableAgents = [
+          { id: 'gpt5', name: 'Azure FinOps Copilot', model: 'GPT-5', connected: true },
+          { id: 'gpt-4', name: 'GPT-4 Turbo', model: 'GPT-4', connected: false },
+          { id: 'gemini', name: 'Gemini Pro', model: 'Gemini', connected: false },
+        ]
+
+    const handleExecChat = async (directQuery?: string) => {
+      const msg = directQuery || execChatInput
+      if (!msg.trim()) return
+      setExecChatMessages(prev => [...prev, { role: 'user', content: msg }])
+      setExecChatInput('')
+      try {
+        const res = await fetch(`${API_URL}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg, context: 'executive' }) })
+        const data = await res.json()
+        setExecChatMessages(prev => [...prev, { role: 'assistant', content: data.response }])
+      } catch (e) {
+        setExecChatMessages(prev => [...prev, { role: 'assistant', content: 'Error connecting to AI.' }])
+      }
+    }
+
+    // Quick questions moved to inline query buttons in Executive Summary
+
+    const saveAzureConfig = async () => {
+      setIsConnecting(true)
+      try {
+        await fetch(`${API_URL}/api/azure-config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(azureConfig) })
+        const testRes = await fetch(`${API_URL}/api/azure-config/test`, { method: 'POST' })
+        const testData = await testRes.json()
+        if (testData.success) {
+          toast.success('Azure connection successful', { description: testData.tenant_name })
+          setAzureStatus({ configured: true, ...testData })
+        } else {
+          toast.error('Connection failed', { description: testData.message })
+        }
+      } catch (e) { toast.error('Failed to save configuration') }
+      setIsConnecting(false)
+    }
+
+    const runDiscovery = async () => {
+      setIsDiscovering(true)
+      try {
+        const res = await fetch(`${API_URL}/api/azure-config/discover`, { method: 'POST' })
+        const data = await res.json()
+        if (data.success) {
+          setDiscoveryResult(data)
+          toast.success('Discovery completed', { description: `Found ${data.summary.total} resources` })
+        } else {
+          toast.error('Discovery failed', { description: data.message })
+        }
+      } catch (e) { toast.error('Discovery failed') }
+      setIsDiscovering(false)
+    }
+
+    const toggleControl = async (controlId: string) => {
+      try {
+        const res = await fetch(`${API_URL}/api/controls/${controlId}/toggle`, { method: 'POST' })
+        const data = await res.json()
+        if (data.success) {
+          setControlSettings((prev: any) => ({ ...prev, [controlId]: { ...prev[controlId], enabled: data.enabled } }))
+          toast.success(`Control ${data.enabled ? 'enabled' : 'disabled'}`)
+        }
+      } catch (e) { toast.error('Failed to toggle control') }
+    }
+
+    const updateCircuitBreaker = async (breakerId: string, threshold: number) => {
+      try {
+        await fetch(`${API_URL}/api/circuit-breakers/${breakerId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ threshold }) })
+        setCircuitBreakers((prev: any) => ({ ...prev, [breakerId]: { ...prev[breakerId], threshold } }))
+        toast.success('Circuit breaker updated')
+      } catch (e) { toast.error('Failed to update') }
+    }
+
+  const fmt = (v?: number | null) => {
+    const n = typeof v === 'number' && !Number.isNaN(v) ? v : 0
+    return n >= 1000000 ? `$${(n/1000000).toFixed(1)}M` : n >= 1000 ? `$${(n/1000).toFixed(0)}K` : `$${n.toFixed(0)}`
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-gray-100">
+      <Toaster position="top-right" theme="dark" richColors />
+      
+      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-50">
+        <div className="px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                <Cloud className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-white">FinOps AI Command Center</h1>
+                <p className="text-xs text-slate-400">AdventHealth Azure Cost Intelligence</p>
+              </div>
+              <button onClick={() => setIsLive(!isLive)} className={`ml-4 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${isLive ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-slate-700 text-slate-400'}`}>
+                <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-400 animate-pulse' : 'bg-slate-500'}`} />
+                LIVE
+              </button>
+            </div>
+            <div className="flex items-center gap-6">
+              <div className="text-center"><p className="text-xs text-slate-400">Today's Savings</p><p className="text-lg font-bold text-green-400">${stats?.todays_savings?.toLocaleString() || '0'}</p></div>
+              <div className="text-center"><p className="text-xs text-slate-400">Agents Active</p><p className="text-lg font-bold text-blue-400">{stats?.agents_active || 0}</p></div>
+              <div className="text-center"><p className="text-xs text-slate-400">Anomalies Today</p><p className="text-lg font-bold text-orange-400">{stats?.anomalies_today || 0}</p></div>
+              <div className="text-right"><p className="text-xs text-slate-400">{currentTime.toLocaleDateString()}</p><p className="text-sm font-mono text-white">{currentTime.toLocaleTimeString()}</p></div>
+            </div>
+          </div>
+          <div className="flex gap-1 mt-4">
+            {tabs.map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === tab.id ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
+                <tab.icon className="w-4 h-4" />{tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <main className="p-6">
+        {activeTab === 'exec' && stats && (
+          <div className="space-y-6">
+            {/* Key Metrics Row */}
+            <div className="grid grid-cols-6 gap-4">
+              {[
+                { label: 'MONTHLY AZURE COST', value: '$588K', sub: '$19.6K daily rate', icon: TrendingUp, color: 'blue' },
+                { label: 'MONTHLY SAVINGS', value: fmt(stats.ai_savings), change: '+$127K vs last month', icon: DollarSign, color: 'green' },
+                { label: 'ANOMALIES RESOLVED', value: `${alerts.filter((a: any) => a.status === 'auto-resolved' || a.status === 'owner-notified').length}/${alerts.length}`, sub: 'This month', icon: CheckCircle, color: 'blue' },
+                { label: 'BUDGET STATUS', value: budgets.some((b: any) => b.threshold_status === 'critical') ? 'AT RISK' : budgets.some((b: any) => b.threshold_status === 'warning') ? 'WARNING' : 'HEALTHY', sub: `${budgets.filter((b: any) => b.threshold_status === 'healthy' || b.threshold_status === 'info').length}/${budgets.length} budgets on track`, icon: Shield, color: budgets.some((b: any) => b.threshold_status === 'critical') ? 'red' : budgets.some((b: any) => b.threshold_status === 'warning') ? 'yellow' : 'green' },
+                { label: 'RI COVERAGE', value: `${stats.ri_coverage}%`, sub: `Target: ${stats.target_coverage}%`, icon: Target, color: stats.ri_coverage >= stats.target_coverage ? 'green' : 'yellow' },
+                { label: 'AGENT SAVINGS', value: fmt(agents.reduce((sum: number, a: any) => sum + (a.savings_identified || 0), 0)), sub: `${agents.length} agents active`, icon: Bot, color: 'purple' },
+              ].map((s, i) => (
+                <div key={i} className={`rounded-xl border p-5 bg-slate-900 border-slate-800`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-slate-400 font-medium">{s.label}</span>
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-${s.color}-500/20`}>
+                      <s.icon className={`w-4 h-4 text-${s.color}-400`} />
+                    </div>
+                  </div>
+                  <p className={`text-2xl font-bold text-${s.color}-400`}>{s.value}</p>
+                  {s.change && <p className="text-xs mt-1 text-green-400">{s.change}</p>}
+                  {s.sub && <p className="text-xs text-slate-500 mt-1">{s.sub}</p>}
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-3 gap-6">
+              {/* Anomaly Resolution Timeline */}
+              <div className="col-span-1 bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <Activity className="w-5 h-5 text-orange-400" />
+                  <h3 className="font-semibold text-white">Anomaly Resolution Timeline</h3>
+                </div>
+                <div className="space-y-3 max-h-80 overflow-y-auto">
+                  {alerts.slice(0, 8).map((alert: any, i: number) => (
+                    <div key={i} className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-lg">
+                      <div className={`w-2 h-2 rounded-full mt-2 ${alert.status === 'auto-resolved' ? 'bg-green-400' : alert.status === 'owner-notified' ? 'bg-blue-400' : alert.status === 'investigating' ? 'bg-yellow-400' : alert.status === 'dismissed' ? 'bg-slate-400' : 'bg-red-400'}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-white truncate">{alert.resource}</p>
+                        <p className="text-xs text-slate-400">{alert.message}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`px-2 py-0.5 rounded text-xs ${alert.status === 'auto-resolved' ? 'bg-green-500/20 text-green-400' : alert.status === 'owner-notified' ? 'bg-blue-500/20 text-blue-400' : alert.status === 'investigating' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-slate-500/20 text-slate-400'}`}>
+                            {alert.status === 'auto-resolved' ? 'Resolved' : alert.status === 'owner-notified' ? 'Owner Notified' : alert.status === 'investigating' ? 'Investigating' : alert.status === 'dismissed' ? 'Dismissed' : 'Pending'}
+                          </span>
+                          <span className="text-xs text-slate-500">{alert.delta}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Budget Guardrails Status */}
+              <div className="col-span-1 bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <Shield className="w-5 h-5 text-blue-400" />
+                  <h3 className="font-semibold text-white">Budget Guardrails</h3>
+                </div>
+                <div className="space-y-3">
+                  {budgets.map((budget: any, i: number) => (
+                    <div key={i} className="p-3 bg-slate-800/50 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm text-white">{budget.name}</span>
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${budget.threshold_status === 'critical' ? 'bg-red-500/20 text-red-400' : budget.threshold_status === 'warning' ? 'bg-yellow-500/20 text-yellow-400' : budget.threshold_status === 'info' ? 'bg-blue-500/20 text-blue-400' : 'bg-green-500/20 text-green-400'}`}>
+                          {budget.percentage}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-700 rounded-full h-2">
+                        <div className={`h-2 rounded-full ${budget.threshold_status === 'critical' ? 'bg-red-500' : budget.threshold_status === 'warning' ? 'bg-yellow-500' : budget.threshold_status === 'info' ? 'bg-blue-500' : 'bg-green-500'}`} style={{ width: `${Math.min(budget.percentage, 100)}%` }} />
+                      </div>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-xs text-slate-500">{fmt(budget.spent)} / {fmt(budget.budget)}</span>
+                        <span className={`text-xs ${budget.threshold_status === 'critical' ? 'text-red-400' : budget.threshold_status === 'warning' ? 'text-yellow-400' : 'text-slate-500'}`}>
+                          {budget.threshold_status === 'critical' ? '⚠️ Over 90%' : budget.threshold_status === 'warning' ? '⚠️ Over 80%' : budget.threshold_status === 'info' ? 'ℹ️ Over 60%' : '✓ On track'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* AI Agent Performance */}
+              <div className="col-span-1 bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <Bot className="w-5 h-5 text-purple-400" />
+                  <h3 className="font-semibold text-white">AI Agent Performance</h3>
+                </div>
+                <div className="space-y-3">
+                  {agents.filter((a: any) => a.role === 'primary').slice(0, 5).map((agent: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${agent.color}20` }}>
+                          <Brain className="w-4 h-4" style={{ color: agent.color }} />
+                        </div>
+                        <div>
+                          <p className="text-sm text-white">{agent.name}</p>
+                          <p className="text-xs text-slate-400">{agent.actions_today} actions today</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-medium text-green-400">{fmt(agent.savings_identified)}</p>
+                        <p className="text-xs text-slate-500">{agent.accuracy}% accuracy</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Conversational AI Section with Query Buttons on Left */}
+            <div className="grid grid-cols-4 gap-6">
+              {/* Left Panel - Query Buttons */}
+              <div className="col-span-1 bg-slate-900 rounded-xl border border-slate-800 p-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <Zap className="w-4 h-4 text-yellow-400" />
+                  <h3 className="font-semibold text-white text-sm">Quick Queries</h3>
+                </div>
+                <div className="space-y-2">
+                  {[
+                    { label: "Last Month's Anomalies", query: "Show me last month's anomalies and how they were resolved", icon: AlertTriangle, color: "text-red-400" },
+                    { label: "GPU Spike Analysis", query: "How was the GPU spike resolved?", icon: Activity, color: "text-orange-400" },
+                    { label: "Budget Status", query: "What's our current budget status?", icon: Shield, color: "text-blue-400" },
+                    { label: "RI Coverage Plan", query: "Explain RI coverage recommendations and savings", icon: Target, color: "text-green-400" },
+                    { label: "SQL Recommendations", query: "Why 3-year RI for SQL workloads?", icon: Server, color: "text-purple-400" },
+                    { label: "Cost Savings Summary", query: "What were our total savings this month?", icon: DollarSign, color: "text-emerald-400" },
+                  ].map((item, i) => (
+                    <button
+                      key={i}
+                      onClick={() => handleExecChat(item.query)}
+                      className="w-full flex items-center gap-3 p-3 bg-slate-800/50 hover:bg-slate-700/50 rounded-lg transition-colors text-left group"
+                    >
+                      <item.icon className={`w-4 h-4 ${item.color} group-hover:scale-110 transition-transform`} />
+                      <span className="text-sm text-slate-300 group-hover:text-white">{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Right Panel - Chat Interface */}
+              <div className="col-span-3 bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <MessageSquare className="w-5 h-5 text-purple-400" />
+                    <h3 className="font-semibold text-white">Azure FinOps Copilot</h3>
+                    <select 
+                      value={selectedAgent}
+                      onChange={(e) => setSelectedAgent(e.target.value)}
+                      className="px-3 py-1 bg-slate-800 border border-slate-700 text-purple-400 text-xs rounded-lg focus:outline-none focus:border-purple-500"
+                    >
+                      {availableAgents.map(agent => (
+                        <option key={agent.id} value={agent.id} disabled={!agent.connected}>
+                          {agent.name} {!agent.connected && '(Not Connected)'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {azureStatus.configured && (
+                    <span className="px-3 py-1 bg-green-500/20 text-green-400 text-xs rounded-full flex items-center gap-2">
+                      <CheckCircle className="w-3 h-3" /> Connected to Azure
+                    </span>
+                  )}
+                </div>
+
+                {/* Chat Messages */}
+                <div className="bg-slate-800/50 rounded-lg p-4 h-72 overflow-y-auto mb-4 space-y-3">
+                  {execChatMessages.map((msg, i) => (
+                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-3xl px-4 py-2 rounded-lg ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-200'}`}>
+                        {msg.role === 'assistant' && <span className="text-xs text-purple-400 block mb-1">Azure FinOps Copilot</span>}
+                        <p className="text-sm leading-relaxed">{msg.content}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Chat Input */}
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    value={execChatInput}
+                    onChange={(e) => setExecChatInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleExecChat()}
+                    placeholder="Ask about costs, anomalies, savings, budgets, or RI recommendations..."
+                    className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  />
+                  <button onClick={() => handleExecChat()} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center gap-2">
+                    <Send className="w-4 h-4" /> Ask AI
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'command' && stats && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-6 gap-4">
+              {[
+                { label: 'MONTHLY SPEND', value: fmt(stats.monthly_spend), change: '-8.2%', icon: DollarSign },
+                { label: 'AI SAVINGS', value: fmt(stats.ai_savings), change: '+15.3%', icon: Brain, highlight: true },
+                { label: 'HIDDEN COSTS', value: fmt(stats.hidden_costs_found), sub: 'Mitigated', icon: Search },
+                { label: 'RI COVERAGE', value: `${stats.ri_coverage}%`, sub: `Target: ${stats.target_coverage}%`, icon: Target },
+                { label: 'BUDGET VARIANCE', value: `+${stats.budget_variance}%`, sub: 'In Control', icon: Shield },
+                { label: 'FORECAST ACCURACY', value: `${stats.forecast_accuracy}%`, change: '+2.1%', icon: TrendingUp },
+              ].map((s, i) => (
+                <div key={i} className={`rounded-xl border p-5 ${s.highlight ? 'bg-gradient-to-br from-green-900/30 to-emerald-900/30 border-green-500/30' : 'bg-slate-900 border-slate-800'}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-slate-400 font-medium">{s.label}</span>
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${s.highlight ? 'bg-green-500/20' : 'bg-slate-800'}`}>
+                      <s.icon className={`w-4 h-4 ${s.highlight ? 'text-green-400' : 'text-slate-400'}`} />
+                    </div>
+                  </div>
+                  <p className={`text-2xl font-bold ${s.highlight ? 'text-green-400' : 'text-white'}`}>{s.value}</p>
+                  {s.change && <p className="text-xs mt-1 text-green-400">{s.change}</p>}
+                  {s.sub && <p className="text-xs text-slate-500 mt-1">{s.sub}</p>}
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-3 gap-6">
+              <div className="col-span-2 bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3"><Activity className="w-5 h-5 text-red-400" /><h3 className="font-semibold text-white">Real-Time Anomaly Detection</h3></div>
+                  <span className="px-3 py-1 bg-green-500/20 text-green-400 text-xs font-medium rounded-full">ML Model Active</span>
+                </div>
+                <ResponsiveContainer width="100%" height={250}>
+                  <ComposedChart data={anomalyData}>
+                    <defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.3}/><stop offset="100%" stopColor="#10b981" stopOpacity={0.05}/></linearGradient></defs>
+                    <XAxis dataKey="date" stroke="#475569" fontSize={11} />
+                    <YAxis stroke="#475569" fontSize={11} tickFormatter={(v) => `$${(v/1000).toFixed(1)}K`} />
+                    <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+                    <Area type="monotone" dataKey="expected" stroke="none" fill="url(#ag)" />
+                    <Line type="monotone" dataKey="expected" stroke="#10b981" strokeDasharray="5 5" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="actual" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 4 }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+                <div className="mt-4 space-y-2">
+                    {alerts.slice(0, 2).map((a: any, i: number) => (
+                      <div key={i} onClick={() => openAlertWorkflow(a)} className="flex items-center justify-between bg-slate-800/50 rounded-lg p-3 cursor-pointer hover:bg-slate-700/50 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <AlertTriangle className={`w-4 h-4 ${a.severity === 'critical' ? 'text-red-400' : 'text-yellow-400'}`} />
+                          <div><p className="text-sm text-white">{a.resource}: {a.delta}</p><p className="text-xs text-slate-400">{a.message}</p></div>
+                        </div>
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${a.status === 'investigating' ? 'bg-yellow-500/20 text-yellow-400' : a.status === 'auto-resolved' ? 'bg-blue-500/20 text-blue-400' : a.status === 'dismissed' ? 'bg-slate-500/20 text-slate-400' : 'bg-green-500/20 text-green-400'}`}>{a.status}</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <div className="flex items-center gap-3 mb-4"><Bot className="w-5 h-5 text-purple-400" /><h3 className="font-semibold text-white">AI Agent Fleet</h3></div>
+                <div className="space-y-3">
+                  {agents.filter((a: any) => a.role === 'primary').slice(0, 4).map((agent: any) => (
+                    <div key={agent.id} className="flex items-center justify-between bg-slate-800/50 rounded-lg p-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${agent.color}20` }}>
+                          <Shield className="w-4 h-4" style={{ color: agent.color }} />
+                        </div>
+                        <div><p className="text-sm font-medium text-white">{agent.name}</p><p className="text-xs text-slate-400 truncate max-w-28">{agent.last_action}</p></div>
+                      </div>
+                      <div className="text-right"><p className="text-sm font-bold text-green-400">${(agent.savings_identified || 0).toLocaleString()}</p><p className="text-xs text-slate-400">{agent.actions_today} actions</p></div>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={() => setActiveTab('agents')} className="w-full mt-4 py-2 text-sm text-slate-400 hover:text-white border border-slate-700 rounded-lg hover:bg-slate-800">View All Agents</button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-6">
+              <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <div className="flex items-center gap-3 mb-4"><Sparkles className="w-5 h-5 text-blue-400" /><h3 className="font-semibold text-white">6-Month Forecast</h3></div>
+                <ResponsiveContainer width="100%" height={180}>
+                  <AreaChart data={forecast}>
+                    <defs><linearGradient id="fg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3b82f6" stopOpacity={0.3}/><stop offset="100%" stopColor="#3b82f6" stopOpacity={0.05}/></linearGradient></defs>
+                    <XAxis dataKey="month" stroke="#475569" fontSize={10} />
+                    <YAxis stroke="#475569" fontSize={10} tickFormatter={(v) => `$${(v/1000).toFixed(0)}K`} />
+                    <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+                    <Area type="monotone" dataKey="predicted" stroke="#3b82f6" fill="url(#fg)" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <div className="flex items-center gap-3 mb-4"><Zap className="w-5 h-5 text-yellow-400" /><h3 className="font-semibold text-white">Quick Actions</h3></div>
+                <div className="space-y-3">
+                  <button onClick={fetchData} className="w-full flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 text-left"><RefreshCw className="w-4 h-4 text-slate-400" /><div><p className="text-sm font-medium text-white">Run Full Scan</p><p className="text-xs text-slate-400">Scan all resources</p></div></button>
+                  <button onClick={generateDemoAlert} className="w-full flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 text-left"><Bell className="w-4 h-4 text-slate-400" /><div><p className="text-sm font-medium text-white">Generate Alert</p><p className="text-xs text-slate-400">Demo notification</p></div></button>
+                  <button onClick={() => setActiveTab('risp')} className="w-full flex items-center gap-3 p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 text-left"><Target className="w-4 h-4 text-slate-400" /><div><p className="text-sm font-medium text-white">Purchase RIs</p><p className="text-xs text-slate-400">Review recommendations</p></div></button>
+                </div>
+              </div>
+
+              <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <div className="flex items-center gap-3 mb-4"><Shield className="w-5 h-5 text-orange-400" /><h3 className="font-semibold text-white">Budget Health</h3></div>
+                <div className="space-y-3">
+                  {budgets.slice(0, 4).map((b: any) => (
+                    <div key={b.id} className="space-y-1">
+                      <div className="flex justify-between text-xs"><span className="text-slate-400">{b.name.replace(' Budget', '')}</span><span className="text-white">${(b.current/1000).toFixed(0)}K / ${(b.allocated/1000).toFixed(0)}K</span></div>
+                      <div className="h-2 bg-slate-800 rounded-full overflow-hidden"><div className={`h-full rounded-full ${b.status === 'critical' ? 'bg-red-500' : b.status === 'warning' ? 'bg-orange-500' : 'bg-green-500'}`} style={{ width: `${Math.min(100, (b.current / b.allocated) * 100)}%` }} /></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'agents' && (
+          <div className="grid grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2"><Bot className="w-5 h-5 text-purple-400" />Primary Agents</h3>
+              {agents.filter((a: any) => a.role === 'primary').map((agent: any) => (
+                <div key={agent.id} className="bg-slate-900 rounded-xl border border-slate-800 p-5">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${agent.color}20` }}><Bot className="w-6 h-6" style={{ color: agent.color }} /></div>
+                      <div><h4 className="font-semibold text-white">{agent.name}</h4><p className="text-sm text-slate-400">{agent.type}</p><p className="text-xs text-slate-500 mt-1">{agent.azure_service}</p></div>
+                    </div>
+                    <div className="text-right">
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" /><span className="text-xs text-green-400">Active</span></div>
+                      <p className="text-lg font-bold text-green-400 mt-1">{agent.accuracy}%</p><p className="text-xs text-slate-400">Accuracy</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-slate-800">
+                    <p className="text-sm text-slate-300">{agent.last_action}</p>
+                    <div className="flex items-center justify-between mt-2"><span className="text-xs text-slate-400">{agent.actions_today} actions today</span>{agent.savings_identified && <span className="text-sm font-semibold text-green-400">${agent.savings_identified.toLocaleString()} identified</span>}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-white flex items-center gap-2"><CheckCircle className="w-5 h-5 text-cyan-400" />Validator Agents</h3>
+              {agents.filter((a: any) => a.role === 'validator').map((agent: any) => (
+                <div key={agent.id} className="bg-slate-900 rounded-xl border border-cyan-900/50 p-5">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${agent.color}20` }}><CheckCircle className="w-6 h-6" style={{ color: agent.color }} /></div>
+                      <div><h4 className="font-semibold text-white">{agent.name}</h4><p className="text-sm text-slate-400">{agent.type}</p><p className="text-xs text-cyan-400 mt-1">Validates: {agent.validates}</p></div>
+                    </div>
+                    <div className="text-right">
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" /><span className="text-xs text-cyan-400">Validating</span></div>
+                      <p className="text-lg font-bold text-cyan-400 mt-1">{agent.accuracy}%</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-slate-800"><p className="text-sm text-slate-300">{agent.last_action}</p></div>
+                </div>
+              ))}
+              <div className="bg-gradient-to-br from-purple-900/30 to-blue-900/30 rounded-xl border border-purple-500/30 p-5">
+                <h4 className="font-semibold text-white mb-3">Agent Orchestration</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-slate-400">Primary Agents</span><span className="text-green-400">{agents.filter((a: any) => a.role === 'primary').length} Active</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Validator Agents</span><span className="text-cyan-400">{agents.filter((a: any) => a.role === 'validator').length} Active</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Cross-Validation</span><span className="text-white">100%</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'hidden' && hiddenCosts && (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-yellow-900/30 to-orange-900/30 rounded-xl border border-yellow-500/30 p-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-xl bg-yellow-500/20 flex items-center justify-center"><Search className="w-7 h-7 text-yellow-400" /></div>
+                  <div><h2 className="text-xl font-bold text-white">Hidden Cost Hunter Active</h2><p className="text-sm text-slate-400">AI agents continuously scanning for cost leaks</p></div>
+                </div>
+                <div className="flex items-center gap-8">
+                  <div className="text-center"><p className="text-2xl font-bold text-white">${(hiddenCosts.total_detected/1000).toFixed(1)}K</p><p className="text-xs text-slate-400">Total Detected</p></div>
+                  <div className="text-center"><p className="text-2xl font-bold text-green-400">${(hiddenCosts.total_mitigated/1000).toFixed(1)}K</p><p className="text-xs text-green-400">Total Mitigated</p></div>
+                  <div className="text-center"><p className="text-2xl font-bold text-white">{hiddenCosts.recovery_rate}%</p><p className="text-xs text-slate-400">Recovery Rate</p></div>
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              {hiddenCosts.categories.map((c: any) => (
+                <div key={c.id} className="bg-slate-900 rounded-xl border border-slate-800 p-5">
+                  <div className="flex items-center justify-between mb-3"><h4 className="font-semibold text-white">{c.name}</h4><span className={`px-2 py-1 rounded text-xs font-medium ${c.status === 'eliminated' ? 'bg-green-500/20 text-green-400' : c.status === 'controlled' ? 'bg-blue-500/20 text-blue-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{c.status}</span></div>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between"><span className="text-slate-400">Detected</span><span className="text-red-400">${c.detected.toLocaleString()}/mo</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Mitigated</span><span className="text-green-400">${c.mitigated.toLocaleString()}/mo</span></div>
+                    <div className="flex justify-between font-semibold"><span className="text-slate-400">Savings</span><span className="text-white">${c.monthly_savings.toLocaleString()}</span></div>
+                  </div>
+                  <div className="mt-3 h-2 bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-full" style={{ width: `${c.progress}%` }} /></div>
+                  <p className="text-xs text-slate-500 mt-2 flex items-center gap-1"><Bot className="w-3 h-3" /> {c.managed_by}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'budget' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-5 gap-4">
+              {budgets.map((b: any) => (
+                <div key={b.id} className={`bg-slate-900 rounded-xl border p-5 ${b.status === 'critical' ? 'border-red-500/50' : b.status === 'warning' ? 'border-yellow-500/50' : 'border-slate-800'}`}>
+                  <div className="flex items-center justify-between mb-3"><h4 className="font-medium text-white text-sm">{b.name}</h4>{b.status === 'critical' ? <AlertTriangle className="w-4 h-4 text-red-400" /> : b.status === 'warning' ? <AlertTriangle className="w-4 h-4 text-yellow-400" /> : <CheckCircle className="w-4 h-4 text-green-400" />}</div>
+                  <div className="h-2 bg-slate-800 rounded-full overflow-hidden mb-3"><div className={`h-full rounded-full ${b.status === 'critical' ? 'bg-red-500' : b.status === 'warning' ? 'bg-yellow-500' : 'bg-green-500'}`} style={{ width: `${Math.min(100, (b.current / b.allocated) * 100)}%` }} /></div>
+                  <div className="space-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-slate-400">Current</span><span className="text-white">${(b.current/1000).toFixed(0)}K</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Allocated</span><span className="text-white">${(b.allocated/1000).toFixed(0)}K</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Forecast</span><span className={b.forecast > b.allocated ? 'text-red-400' : 'text-green-400'}>${(b.forecast/1000).toFixed(0)}K</span></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+              <h3 className="font-semibold text-white mb-4">Budget Alert Thresholds</h3>
+              <div className="grid grid-cols-3 gap-4">
+                {[{ t: '75%', s: 'Info', c: 'blue', d: 'Email notification to FinOps team' }, { t: '90%', s: 'Warning', c: 'yellow', d: 'Email + Slack to IT leadership' }, { t: '100%', s: 'Critical', c: 'red', d: 'All channels + PagerDuty escalation' }].map((a, i) => (
+                  <div key={i} className={`bg-${a.c}-900/20 border border-${a.c}-500/30 rounded-xl p-5`} style={{ backgroundColor: a.c === 'blue' ? 'rgba(59,130,246,0.1)' : a.c === 'yellow' ? 'rgba(234,179,8,0.1)' : 'rgba(239,68,68,0.1)', borderColor: a.c === 'blue' ? 'rgba(59,130,246,0.3)' : a.c === 'yellow' ? 'rgba(234,179,8,0.3)' : 'rgba(239,68,68,0.3)' }}>
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: a.c === 'blue' ? 'rgba(59,130,246,0.2)' : a.c === 'yellow' ? 'rgba(234,179,8,0.2)' : 'rgba(239,68,68,0.2)' }}><Bell className="w-5 h-5" style={{ color: a.c === 'blue' ? '#60a5fa' : a.c === 'yellow' ? '#facc15' : '#f87171' }} /></div>
+                      <div><p className="font-semibold text-white">{a.t} Threshold</p><p className="text-xs" style={{ color: a.c === 'blue' ? '#60a5fa' : a.c === 'yellow' ? '#facc15' : '#f87171' }}>{a.s} Alert</p></div>
+                    </div>
+                    <p className="text-sm text-slate-400">{a.d}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+              <h3 className="font-semibold text-white mb-4">Daily Variance Monitoring</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={varianceData}>
+                  <XAxis dataKey="day" stroke="#475569" fontSize={11} />
+                  <YAxis stroke="#475569" fontSize={11} tickFormatter={(v) => `${v}%`} />
+                  <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+                  <Bar dataKey="variance" radius={[4, 4, 0, 0]}>{varianceData.map((e: any, i: number) => <Cell key={i} fill={Math.abs(e.variance) > 15 ? '#ef4444' : Math.abs(e.variance) > 10 ? '#f59e0b' : '#10b981'} />)}</Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'risp' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-4 gap-4">
+              {[{ l: 'CURRENT RI COVERAGE', v: `${stats?.ri_coverage || 35}%`, c: 'green' }, { l: 'CURRENT SP COVERAGE', v: `${stats?.sp_coverage || 25}%`, c: 'purple' }, { l: 'TARGET COVERAGE', v: `${stats?.target_coverage || 60}%`, c: 'white' }, { l: 'POTENTIAL SAVINGS', v: '$89K', c: 'green' }].map((s, i) => (
+                <div key={i} className="bg-slate-900 rounded-xl border border-slate-800 p-5">
+                  <p className="text-xs text-slate-400 mb-1">{s.l}</p>
+                  <p className={`text-3xl font-bold ${s.c === 'green' ? 'text-green-400' : s.c === 'purple' ? 'text-purple-400' : 'text-white'}`}>{s.v}</p>
+                </div>
+              ))}
+            </div>
+            <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3"><Sparkles className="w-5 h-5 text-purple-400" /><h3 className="font-semibold text-white">AI-Powered Commitment Recommendations</h3></div>
+                <span className="px-3 py-1 bg-purple-500/20 text-purple-400 text-xs font-medium rounded-full">Commitment Advisor Agent</span>
+              </div>
+              <table className="w-full">
+                <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-800"><th className="pb-3">Resource</th><th className="pb-3">Type</th><th className="pb-3">MSRP</th><th className="pb-3">EA Price (12% off)</th><th className="pb-3">RI Price</th><th className="pb-3">SP Price</th><th className="pb-3">Stability</th><th className="pb-3">Recommendation</th><th className="pb-3">Confidence</th></tr></thead>
+                <tbody>
+                  {recommendations.map((r: any, i: number) => (
+                    <tr key={i} className="border-b border-slate-800/50 text-sm">
+                      <td className="py-4 font-medium text-white">{r.resource}</td>
+                      <td className="py-4 text-slate-400">{r.type}</td>
+                      <td className="py-4 text-slate-500">${(r.msrp || r.monthly_cost)?.toLocaleString()}</td>
+                      <td className="py-4 text-white">${(r.ea_price || r.monthly_cost)?.toLocaleString()}</td>
+                      <td className="py-4"><span className="text-green-400">${(r.ri_price || 0)?.toLocaleString()}</span><span className="text-xs text-green-500 ml-1">({r.ri_discount || '36%'} off)</span></td>
+                      <td className="py-4"><span className="text-purple-400">${(r.sp_price || 0)?.toLocaleString()}</span><span className="text-xs text-purple-500 ml-1">({r.sp_discount || '33%'} off)</span></td>
+                      <td className="py-4"><div className="flex items-center gap-2"><div className="w-12 h-2 bg-slate-800 rounded-full overflow-hidden"><div className={`h-full rounded-full ${r.stability >= 90 ? 'bg-green-500' : r.stability >= 75 ? 'bg-yellow-500' : 'bg-orange-500'}`} style={{ width: `${r.stability}%` }} /></div><span className="text-slate-400 text-xs">{r.stability}%</span></div></td>
+                      <td className="py-4"><span className={`px-2 py-1 rounded text-xs font-medium ${r.recommendation.includes('3-Year') ? 'bg-green-500/20 text-green-400' : r.recommendation.includes('SP') ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>{r.recommendation}</span></td>
+                      <td className="py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${r.confidence >= 90 ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'}`}>{r.confidence}%</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="grid grid-cols-2 gap-6">
+              <div className="bg-green-900/20 border border-green-500/30 rounded-xl p-6">
+                <div className="flex items-center gap-2 mb-4"><Lock className="w-5 h-5 text-green-400" /><h4 className="font-semibold text-green-400">Choose Reserved Instances When:</h4></div>
+                <ul className="space-y-2 text-sm text-slate-300">
+                  {['Workload stability >90% over 6+ months', 'Single VM family with no expected changes', 'Maximum savings priority (up to 56% off)', 'Mission-critical apps that won\'t migrate'].map((t, i) => <li key={i} className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-green-400" />{t}</li>)}
+                </ul>
+                <div className="mt-4 p-3 bg-green-900/30 rounded-lg"><p className="text-sm text-green-400 font-medium">3-Year RI: Up to 56% savings</p><p className="text-sm text-green-400">1-Year RI: Up to 36% savings</p></div>
+              </div>
+              <div className="bg-purple-900/20 border border-purple-500/30 rounded-xl p-6">
+                <div className="flex items-center gap-2 mb-4"><Layers className="w-5 h-5 text-purple-400" /><h4 className="font-semibold text-purple-400">Choose Savings Plans When:</h4></div>
+                <ul className="space-y-2 text-sm text-slate-300">
+                  {['Workloads growing or changing', 'Multi-service usage (VMs, AKS, Functions)', 'Need flexibility to change VM families/regions', 'AI/ML workloads with evolving GPU needs'].map((t, i) => <li key={i} className="flex items-center gap-2"><CheckCircle className="w-4 h-4 text-purple-400" />{t}</li>)}
+                </ul>
+                <div className="mt-4 p-3 bg-purple-900/30 rounded-lg"><p className="text-sm text-purple-400 font-medium">3-Year SP: Up to 52% savings</p><p className="text-sm text-purple-400">1-Year SP: Up to 33% savings</p></div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'controls' && (
+          <div className="grid grid-cols-2 gap-6">
+            <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+              <div className="flex items-center gap-3 mb-6"><Sliders className="w-5 h-5 text-blue-400" /><h3 className="font-semibold text-white">Automation Controls</h3></div>
+              <div className="space-y-4">
+                {controls.map((c: any) => (
+                  <div key={c.id} className="flex items-center justify-between bg-slate-800/50 rounded-xl p-4">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${c.enabled ? 'bg-green-500/20' : 'bg-slate-700'}`}><Power className={`w-5 h-5 ${c.enabled ? 'text-green-400' : 'text-slate-500'}`} /></div>
+                      <div><p className="font-medium text-white">{c.name}</p><p className="text-xs text-slate-400">{c.description}</p></div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${c.risk === 'low' ? 'bg-green-500/20 text-green-400' : c.risk === 'medium' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>{c.risk} risk</span>
+                      <div className={`w-12 h-6 rounded-full p-1 ${c.enabled ? 'bg-green-500' : 'bg-slate-700'}`}><div className={`w-4 h-4 rounded-full bg-white transition-transform ${c.enabled ? 'translate-x-6' : ''}`} /></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+              <div className="flex items-center gap-3 mb-6"><Bell className="w-5 h-5 text-orange-400" /><h3 className="font-semibold text-white">Alert Configuration</h3></div>
+              <div className="space-y-3">
+                {alertConfigs.map((c: any) => (
+                  <div key={c.id} className="flex items-center justify-between bg-slate-800/50 rounded-xl p-4">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-3 h-3 rounded-full ${c.severity === 'critical' ? 'bg-red-400' : c.severity === 'warning' ? 'bg-yellow-400' : 'bg-blue-400'}`} />
+                      <div><p className="font-medium text-white">{c.name}</p><p className="text-xs text-slate-400">{c.channels}</p></div>
+                    </div>
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${c.severity === 'critical' ? 'bg-red-500/20 text-red-400' : c.severity === 'warning' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400'}`}>{c.severity}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'mission' && (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 rounded-xl border border-purple-500/30 p-6">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-xl bg-purple-500/20 flex items-center justify-center"><Brain className="w-7 h-7 text-purple-400" /></div>
+                <div><h2 className="text-xl font-bold text-white">Mission Critical Workload Protection</h2><p className="text-sm text-slate-400">Healthcare systems with guaranteed uptime and cost predictability</p></div>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              {missionCritical.map((mc: any) => (
+                <div key={mc.id} className="bg-slate-900 rounded-xl border border-slate-800 p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3"><Shield className="w-5 h-5 text-green-400" /><h4 className="font-semibold text-white">{mc.name}</h4></div>
+                    <span className="px-2 py-1 bg-green-500/20 text-green-400 text-xs font-medium rounded">{mc.status}</span>
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between"><span className="text-slate-400">Monthly Cost</span><span className="text-white font-medium">${mc.monthly_cost.toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Protection Level</span><span className="text-green-400">{mc.protection_level}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Coverage Type</span><span className="text-blue-400">{mc.coverage_type}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-400">Capacity Headroom</span><span className="text-white">{mc.capacity_headroom}%</span></div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-slate-800"><div className="flex items-center gap-2 text-xs text-slate-400"><Lock className="w-3 h-3" /><span>Capacity reserved - Cost locked - SLA protected</span></div></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-6">
+              <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <div className="flex items-center gap-3 mb-6"><Key className="w-5 h-5 text-blue-400" /><h3 className="font-semibold text-white">Azure Connection</h3></div>
+                {azureStatus?.configured ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 p-4 bg-green-900/20 border border-green-500/30 rounded-lg">
+                      <CheckCircle className="w-5 h-5 text-green-400" />
+                      <div><p className="text-sm font-medium text-green-400">Connected to Azure</p><p className="text-xs text-slate-400">{azureStatus.tenant_name || 'Tenant configured'}</p></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div><span className="text-slate-400">Tenant ID:</span><span className="ml-2 text-white">{azureStatus.tenant_id}</span></div>
+                      <div><span className="text-slate-400">Client ID:</span><span className="ml-2 text-white">{azureStatus.client_id}</span></div>
+                      <div><span className="text-slate-400">Subscription:</span><span className="ml-2 text-white">{azureStatus.subscription_id}</span></div>
+                      <div><span className="text-slate-400">Last Discovery:</span><span className="ml-2 text-white">{azureStatus.last_discovery ? new Date(azureStatus.last_discovery).toLocaleString() : 'Never'}</span></div>
+                    </div>
+                    <button onClick={runDiscovery} disabled={isDiscovering} className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium disabled:opacity-50">
+                      {isDiscovering ? <><Loader2 className="w-4 h-4 animate-spin" />Running Discovery...</> : <><Play className="w-4 h-4" />Run Discovery</>}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="space-y-3">
+                      <div><label className="text-xs text-slate-400 block mb-1">Tenant ID</label><input type="text" value={azureConfig.tenant_id} onChange={(e) => setAzureConfig({...azureConfig, tenant_id: e.target.value})} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" /></div>
+                      <div><label className="text-xs text-slate-400 block mb-1">Client ID (App Registration)</label><input type="text" value={azureConfig.client_id} onChange={(e) => setAzureConfig({...azureConfig, client_id: e.target.value})} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" /></div>
+                      <div><label className="text-xs text-slate-400 block mb-1">Client Secret</label><input type="password" value={azureConfig.client_secret} onChange={(e) => setAzureConfig({...azureConfig, client_secret: e.target.value})} placeholder="Enter client secret" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" /></div>
+                      <div><label className="text-xs text-slate-400 block mb-1">Subscription ID</label><input type="text" value={azureConfig.subscription_id} onChange={(e) => setAzureConfig({...azureConfig, subscription_id: e.target.value})} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" /></div>
+                    </div>
+                    <button onClick={saveAzureConfig} disabled={isConnecting} className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium disabled:opacity-50">
+                      {isConnecting ? <><Loader2 className="w-4 h-4 animate-spin" />Connecting...</> : <><Save className="w-4 h-4" />Connect to Azure</>}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                <div className="flex items-center gap-3 mb-6"><Globe className="w-5 h-5 text-purple-400" /><h3 className="font-semibold text-white">Discovery Results</h3></div>
+                {discoveryResult ? (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      {Object.entries(discoveryResult.summary).filter(([k]) => k !== 'total').map(([key, value]) => (
+                        <div key={key} className="bg-slate-800/50 rounded-lg p-3"><p className="text-xs text-slate-400 capitalize">{key.replace('_', ' ')}</p><p className="text-xl font-bold text-white">{String(value)}</p></div>
+                      ))}
+                    </div>
+                    <div className="border-t border-slate-800 pt-4">
+                      <div className="flex justify-between text-sm"><span className="text-slate-400">Total Resources</span><span className="text-white font-bold">{discoveryResult.summary.total}</span></div>
+                      <div className="flex justify-between text-sm mt-2"><span className="text-slate-400">Monthly Spend</span><span className="text-white font-bold">${(discoveryResult.cost_summary.monthly_spend/1000).toFixed(0)}K</span></div>
+                      <div className="flex justify-between text-sm mt-2"><span className="text-slate-400">Potential Savings</span><span className="text-green-400 font-bold">${(discoveryResult.cost_summary.potential_savings/1000).toFixed(0)}K</span></div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-48 text-slate-500">
+                    <Server className="w-12 h-12 mb-3 opacity-50" />
+                    <p className="text-sm">No discovery results yet</p>
+                    <p className="text-xs mt-1">Connect to Azure and run discovery</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+              <div className="flex items-center gap-3 mb-6"><Sliders className="w-5 h-5 text-orange-400" /><h3 className="font-semibold text-white">Automation Controls</h3></div>
+              <div className="grid grid-cols-2 gap-4">
+                {Object.entries(controlSettings).map(([id, settings]: [string, any]) => (
+                  <div key={id} className="flex items-center justify-between bg-slate-800/50 rounded-xl p-4">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${settings.enabled ? 'bg-green-500/20' : 'bg-slate-700'}`}><Power className={`w-5 h-5 ${settings.enabled ? 'text-green-400' : 'text-slate-500'}`} /></div>
+                      <div><p className="font-medium text-white capitalize">{id.replace(/-/g, ' ')}</p><p className="text-xs text-slate-400">{settings.schedule || settings.threshold_percent ? `Threshold: ${settings.threshold_percent || settings.schedule}` : 'Configurable'}</p></div>
+                    </div>
+                    <button onClick={() => toggleControl(id)} className={`w-12 h-6 rounded-full p-1 transition-colors ${settings.enabled ? 'bg-green-500' : 'bg-slate-700'}`}><div className={`w-4 h-4 rounded-full bg-white transition-transform ${settings.enabled ? 'translate-x-6' : ''}`} /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+              <div className="flex items-center gap-3 mb-6"><Zap className="w-5 h-5 text-red-400" /><h3 className="font-semibold text-white">Circuit Breaker Thresholds</h3></div>
+              <div className="grid grid-cols-5 gap-4">
+                {Object.entries(circuitBreakers).map(([id, settings]: [string, any]) => (
+                  <div key={id} className="bg-slate-800/50 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-sm font-medium text-white capitalize">{id.replace(/-/g, ' ')}</p>
+                      <span className={`w-2 h-2 rounded-full ${settings.enabled ? 'bg-green-400' : 'bg-red-400'}`} />
+                    </div>
+                    <div className="space-y-2">
+                      <input type="number" value={settings.threshold} onChange={(e) => updateCircuitBreaker(id, Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+                      <p className="text-xs text-slate-500">{settings.unit}</p>
+                      <p className="text-xs text-blue-400">Action: {settings.action}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Chat Widget */}
+      <div className="fixed bottom-6 right-6 z-50">
+        {chatOpen && (
+          <div className="absolute bottom-16 right-0 w-96 bg-slate-900 rounded-xl border border-slate-700 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-800/50">
+              <div className="flex items-center gap-2"><MessageSquare className="w-5 h-5 text-blue-400" /><span className="font-semibold text-white">FinOps AI Assistant</span></div>
+              <button onClick={() => setChatOpen(false)} className="text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="h-80 overflow-y-auto p-4 space-y-4">
+              {chatMessages.map((m: any, i: number) => (
+                <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-xs rounded-lg p-3 text-sm ${m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-200'}`}><p className="whitespace-pre-wrap">{m.content}</p></div>
+                </div>
+              ))}
+            </div>
+            <div className="p-4 border-t border-slate-800">
+              <div className="flex gap-2">
+                <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleChat()} placeholder="Ask about costs..." className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500" />
+                <button onClick={handleChat} className="px-3 py-2 bg-blue-600 rounded-lg hover:bg-blue-700"><Send className="w-4 h-4 text-white" /></button>
+              </div>
+            </div>
+          </div>
+        )}
+        <button onClick={() => setChatOpen(!chatOpen)} className="w-14 h-14 bg-blue-600 rounded-full flex items-center justify-center shadow-lg hover:bg-blue-700"><MessageSquare className="w-6 h-6 text-white" /></button>
+      </div>
+
+      {/* Alert Investigation Modal */}
+      {alertModalOpen && selectedAlert && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={() => setAlertModalOpen(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-3xl mx-4 shadow-2xl max-h-screen overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 border-b border-slate-800">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${selectedAlert.severity === 'critical' ? 'bg-red-500/20' : 'bg-yellow-500/20'}`}>
+                    <AlertTriangle className={`w-5 h-5 ${selectedAlert.severity === 'critical' ? 'text-red-400' : 'text-yellow-400'}`} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">{selectedAlert.resource}</h3>
+                    <p className="text-sm text-slate-400">{selectedAlert.message}</p>
+                  </div>
+                </div>
+                <button onClick={() => setAlertModalOpen(false)} className="text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+              </div>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-4 gap-4">
+                <div className="bg-slate-800/50 rounded-lg p-4">
+                  <p className="text-xs text-slate-400 mb-1">Cost Impact</p>
+                  <p className="text-xl font-bold text-red-400">{selectedAlert.delta}</p>
+                </div>
+                <div className="bg-slate-800/50 rounded-lg p-4">
+                  <p className="text-xs text-slate-400 mb-1">Severity</p>
+                  <p className={`text-xl font-bold ${selectedAlert.severity === 'critical' ? 'text-red-400' : 'text-yellow-400'}`}>{selectedAlert.severity?.toUpperCase() || 'INFO'}</p>
+                </div>
+                <div className="bg-slate-800/50 rounded-lg p-4">
+                  <p className="text-xs text-slate-400 mb-1">Detected</p>
+                  <p className="text-sm font-medium text-white">{new Date().toLocaleTimeString()}</p>
+                </div>
+                <div className="bg-slate-800/50 rounded-lg p-4">
+                  <p className="text-xs text-slate-400 mb-1">Status</p>
+                  <p className={`text-sm font-medium ${selectedAlert.status === 'investigating' ? 'text-yellow-400' : selectedAlert.status === 'owner-notified' ? 'text-blue-400' : 'text-white'}`}>{selectedAlert.status || 'new'}</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-800/50 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs text-slate-400">Investigation Workflow</p>
+                  {investigationRunning && <span className="text-xs text-blue-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Running...</span>}
+                  {workflowStep === 4 && <span className="text-xs text-green-400 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Complete</span>}
+                </div>
+                <div className="space-y-3">
+                  {[
+                    { step: 1, label: 'Analyzing resource metrics in Azure Monitor', agent: 'Cost Sentinel' },
+                    { step: 2, label: 'Identifying root cause and anomaly pattern', agent: 'GPT-5' },
+                    { step: 3, label: 'Cross-validating findings with historical data', agent: 'Cost Validator' },
+                    { step: 4, label: 'Generating remediation recommendations', agent: 'Recommendation Engine' },
+                  ].map(({ step, label, agent }) => (
+                    <div key={step} className="flex items-center gap-3 text-sm">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
+                        workflowStep > step ? 'bg-green-500/20' : workflowStep === step ? 'bg-blue-500/20' : 'bg-slate-700/60'
+                      }`}>
+                        {workflowStep > step ? <CheckCircle className="w-3 h-3 text-green-400" /> : 
+                         workflowStep === step && investigationRunning ? <Loader2 className="w-3 h-3 text-blue-400 animate-spin" /> :
+                         <span className={`text-xs ${workflowStep === step ? 'text-blue-400' : 'text-slate-500'}`}>{step}</span>}
+                      </div>
+                      <span className={`flex-1 ${workflowStep > step ? 'text-slate-500 line-through' : workflowStep === step ? 'text-white' : 'text-slate-400'}`}>{label}</span>
+                      <span className="text-xs text-slate-500">{agent}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {workflowStep >= 4 && (
+                <div className="bg-slate-800/50 rounded-lg p-4">
+                  <p className="text-xs text-slate-400 mb-3">Recommended Actions</p>
+                  <div className="space-y-2">
+                    {getRecommendationsForAlert(selectedAlert).map((rec, i) => (
+                      <div key={i} className="flex items-center justify-between bg-slate-900/50 rounded-lg p-3">
+                        <span className="text-sm text-slate-300">{rec.title}</span>
+                        <button className="px-3 py-1 bg-blue-600/20 text-blue-400 text-xs rounded hover:bg-blue-600/30">{rec.action}</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {emailStage !== 'idle' && (
+                <div className="bg-slate-800/50 rounded-lg p-4 border border-blue-500/30">
+                  <p className="text-xs text-slate-400 mb-3">Email Notification to Resource Owner</p>
+                  <div className="bg-slate-900/70 rounded-lg p-4 space-y-2 text-sm">
+                    <div className="flex gap-2"><span className="text-slate-500">To:</span><span className="text-white">{getOwnerEmail(selectedAlert)}</span></div>
+                    <div className="flex gap-2"><span className="text-slate-500">Subject:</span><span className="text-white">Cost Alert: {selectedAlert.resource}</span></div>
+                    <div className="border-t border-slate-700 pt-3 mt-3 text-slate-300 whitespace-pre-wrap text-xs">
+{`Hi,
+
+An automated FinOps guardrail detected a ${(selectedAlert.severity || 'info').toUpperCase()} cost event:
+
+Resource: ${selectedAlert.resource}
+Impact: ${selectedAlert.delta}
+Details: ${selectedAlert.message}
+
+Recommended actions:
+${getRecommendationsForAlert(selectedAlert).map(r => `- ${r.title}`).join('\n')}
+
+Please review and take appropriate action.
+
+Thanks,
+FinOps AI Command Center`}
+                    </div>
+                  </div>
+                  {emailStage === 'preview' && (
+                    <div className="flex gap-2 mt-4 justify-end">
+                      <button onClick={() => setEmailStage('idle')} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-sm">Cancel</button>
+                      <button onClick={() => handleAlertAction('send-email')} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white text-sm flex items-center gap-2"><Send className="w-4 h-4" /> Send Email (Simulated)</button>
+                    </div>
+                  )}
+                  {emailStage === 'sent' && (
+                    <div className="mt-4 flex items-center gap-2 text-green-400 text-sm"><CheckCircle className="w-4 h-4" /> Email sent successfully (simulated)</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-slate-800 flex flex-wrap gap-3">
+              <button onClick={() => handleAlertAction('investigate')} disabled={investigationRunning} className="flex-1 py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-white text-sm font-medium flex items-center justify-center gap-2">
+                {investigationRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />} {investigationRunning ? 'Investigating...' : 'Investigate'}
+              </button>
+              <button onClick={() => handleAlertAction('notify')} disabled={workflowStep < 4} className="flex-1 py-2 px-4 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg text-white text-sm font-medium flex items-center justify-center gap-2">
+                <Send className="w-4 h-4" /> Notify Owner
+              </button>
+              <button onClick={() => handleAlertAction('remediate')} className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 rounded-lg text-white text-sm font-medium flex items-center justify-center gap-2">
+                <Zap className="w-4 h-4" /> Auto-Remediate
+              </button>
+              <button onClick={() => handleAlertAction('escalate')} className="flex-1 py-2 px-4 bg-orange-600 hover:bg-orange-700 rounded-lg text-white text-sm font-medium flex items-center justify-center gap-2">
+                <Bell className="w-4 h-4" /> Escalate
+              </button>
+              <button onClick={() => handleAlertAction('dismiss')} className="py-2 px-4 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 text-sm font-medium">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <footer className="border-t border-slate-800 bg-slate-900/50 px-6 py-4 mt-6">
+        <div className="flex items-center justify-between text-xs text-slate-500">
+          <span>Azure FinOps AI Command Center v2.0 - Powered by Azure AI Foundry</span>
+          <div className="flex items-center gap-6">
+            <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-400" />{agents.length} AI Agents Active</span>
+            <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-400" />8 Guardrails Enabled</span>
+            <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-purple-400" />${((stats?.ai_savings || 0) / 1000).toFixed(0)}K/mo Savings</span>
+          </div>
+        </div>
+      </footer>
+    </div>
+  )
+}
+
+export default App
