@@ -2,6 +2,24 @@
 
 A comprehensive Azure FinOps dashboard for cost optimization, anomaly detection, and intelligent resource management. Built for AdventHealth Azure Cost Intelligence.
 
+## Demo Video
+
+Watch the 5-minute narrated demo showcasing cost spike detection, AI agent orchestration, and RI/SP optimization:
+
+[![FinOps Demo Video](video_assets/screenshots/01_executive_summary.png)](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)
+
+**[Download Demo Video (6.8 MB)](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)** | Voice narration generated with Azure OpenAI Realtime Mini
+
+The demo covers:
+- Executive Summary with real AdventHealth cost data
+- Real-time anomaly detection (GPU cost spike at $847/hr)
+- AI Agent Fleet with 9 agents and cross-validation
+- RI/SP Optimizer with pricing breakdown (MSRP → EA → RI/SP)
+- Budget Guardrails with threshold alerts
+- Automation Controls and alert configuration
+
+---
+
 ![Executive Summary](screenshots/executive-summary.png)
 
 ## Overview
