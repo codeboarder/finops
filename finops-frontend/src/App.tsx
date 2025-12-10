@@ -788,7 +788,7 @@ function App() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-white">FinOps AI Command Center</h1>
-                <p className="text-xs text-slate-400">AdventHealth Azure Cost Intelligence</p>
+                <p className="text-xs text-slate-400">ContosoHealth Azure Cost Intelligence</p>
               </div>
               <button onClick={() => setIsLive(!isLive)} className={`ml-4 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${isLive ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-slate-700 text-slate-400'}`}>
                 <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-400 animate-pulse' : 'bg-slate-500'}`} />

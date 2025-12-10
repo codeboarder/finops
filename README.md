@@ -10,7 +10,7 @@ Watch the complete walkthrough demonstrating the RI/SP decision workflow, SaaS e
 
 **[Download Full Demo Video](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)**
 
-The demo showcases a real healthcare scenario: AdventHealth's Patient Front Door application (SQL Server + Windows VMs) being evaluated against PatientRUs App, a call center SaaS solution with 70% adoption probability.
+The demo showcases a real healthcare scenario: ContosoHealth's Patient Front Door application (SQL Server + Windows VMs) being evaluated against PatientRUs App, a call center SaaS solution with 70% adoption probability.
 
 ## Why RI/SP Optimization Matters
 
