@@ -74,14 +74,22 @@ function App() {
                 // const [activeDrawerTab, setActiveDrawerTab] = useState('intelligence')
                 // const [newContextNote, setNewContextNote] = useState('')
                 // const [contextHistory, setContextHistory] = useState<any[]>([])
-                const [showReEvalPrompt, setShowReEvalPrompt] = useState(false)
-                const [reEvalTriggers, setReEvalTriggers] = useState({
-                  new_document: false,
-                  status_change: false,
-                  new_context: false,
-                  decision_date_passed: false,
-                  fresh_analysis: false
-                })
+                                const [showReEvalPrompt, setShowReEvalPrompt] = useState(false)
+                                const [reEvalTriggers, setReEvalTriggers] = useState({
+                                  new_document: false,
+                                  status_change: false,
+                                  new_context: false,
+                                  decision_date_passed: false,
+                                  fresh_analysis: false
+                                })
+                                const [discountSettings, setDiscountSettings] = useState({
+                                  ea_discount: 12,
+                                  ri_1year_discount: 36,
+                                  ri_3year_discount: 56,
+                                  sp_1year_discount: 33,
+                                  sp_3year_discount: 52
+                                })
+                                const [rispActions, setRispActions] = useState<any>({ approved_count: 0, held_count: 0, blocked_count: 0, total_approved_savings: 0 })
 
               const fetchData = useCallback(async () => {
             try {
@@ -120,22 +128,40 @@ function App() {
                               setSmartRecommendations(null)
                             }
 
-                            // Fetch workloads and evaluations
-                            try {
-                              const wlRes = await fetch(`${API_URL}/api/workloads`)
-                              const wlData = await wlRes.json()
-                              setWorkloads(wlData.workloads || [])
-                            } catch {
-                              setWorkloads([])
-                            }
+                                                        // Fetch workloads and evaluations
+                                                        try {
+                                                          const wlRes = await fetch(`${API_URL}/api/workloads`)
+                                                          const wlData = await wlRes.json()
+                                                          setWorkloads(wlData.workloads || [])
+                                                        } catch {
+                                                          setWorkloads([])
+                                                        }
 
-                            try {
-                              const evalRes = await fetch(`${API_URL}/api/evaluations`)
-                              const evalData = await evalRes.json()
-                              setEvaluations(evalData.evaluations || [])
-                            } catch {
-                              setEvaluations([])
-                            }
+                                                        try {
+                                                          const evalRes = await fetch(`${API_URL}/api/evaluations`)
+                                                          const evalData = await evalRes.json()
+                                                          setEvaluations(evalData.evaluations || [])
+                                                        } catch {
+                                                          setEvaluations([])
+                                                        }
+
+                                                        // Fetch discount settings
+                                                        try {
+                                                          const discRes = await fetch(`${API_URL}/api/discount-settings`)
+                                                          const discData = await discRes.json()
+                                                          setDiscountSettings(discData)
+                                                        } catch {
+                                                          // Keep defaults
+                                                        }
+
+                                                        // Fetch RI/SP actions for Executive Summary
+                                                        try {
+                                                          const rispRes = await fetch(`${API_URL}/api/risp-actions`)
+                                                          const rispData = await rispRes.json()
+                                                          setRispActions(rispData)
+                                                        } catch {
+                                                          // Keep defaults
+                                                        }
         
               const endpoints = ['stats', 'agents', 'hidden-costs', 'budgets', 'recommendations', 'controls', 'alert-config', 'mission-critical', 'alerts', 'anomaly-data', 'variance-data', 'forecast', 'azure-config', 'control-settings', 'circuit-breakers']
               const results = await Promise.all(endpoints.map(e => fetch(`${API_URL}/api/${e}`).then(r => r.json()).catch(() => null)))
@@ -408,15 +434,48 @@ function App() {
       } catch (e) { toast.error('Failed to toggle control') }
     }
 
-    const updateCircuitBreaker = async (breakerId: string, threshold: number) => {
-      try {
-        await fetch(`${API_URL}/api/circuit-breakers/${breakerId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ threshold }) })
-        setCircuitBreakers((prev: any) => ({ ...prev, [breakerId]: { ...prev[breakerId], threshold } }))
-        toast.success('Circuit breaker updated')
-      } catch (e) { toast.error('Failed to update') }
-    }
+        const updateCircuitBreaker = async (breakerId: string, threshold: number) => {
+          try {
+            await fetch(`${API_URL}/api/circuit-breakers/${breakerId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ threshold }) })
+            setCircuitBreakers((prev: any) => ({ ...prev, [breakerId]: { ...prev[breakerId], threshold } }))
+            toast.success('Circuit breaker updated')
+          } catch (e) { toast.error('Failed to update') }
+        }
 
-    const importCsvData = async () => {
+        const saveDiscountSettings = async () => {
+          try {
+            await fetch(`${API_URL}/api/discount-settings`, { 
+              method: 'PUT', 
+              headers: { 'Content-Type': 'application/json' }, 
+              body: JSON.stringify(discountSettings) 
+            })
+            toast.success('Discount settings saved - prices will update on next refresh')
+            fetchData() // Refresh recommendations with new discounts
+          } catch (e) { 
+            toast.error('Failed to save discount settings') 
+          }
+        }
+
+        const recordRispAction = async (action: string, recommendation: any) => {
+          try {
+            await fetch(`${API_URL}/api/risp-actions/${action}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                resource: recommendation.resource,
+                type: recommendation.type,
+                savings: recommendation.ri_savings || recommendation.sp_savings || 0,
+                recommendation: recommendation.recommendation
+              })
+            })
+            toast.success(`Recommendation ${action}ed`)
+            fetchData() // Refresh to update Executive Summary
+          } catch (e) {
+            toast.error(`Failed to ${action} recommendation`)
+          }
+        }
+
+        const importCsvData = async () => {
       if (!csvInput.trim()) {
         toast.error('Please paste CSV data first')
         return
@@ -824,6 +883,52 @@ function App() {
               </div>
             </div>
 
+            {/* RI/SP Action Metrics */}
+            <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <Target className="w-5 h-5 text-cyan-400" />
+                <h3 className="font-semibold text-white">RI/SP Recommendation Actions</h3>
+              </div>
+              <div className="grid grid-cols-4 gap-4">
+                <div className="bg-slate-800/50 rounded-xl p-4 text-center">
+                  <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-2">
+                    <CheckCircle className="w-6 h-6 text-green-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-green-400">{rispActions.approved_count}</p>
+                  <p className="text-sm text-slate-400">Approved</p>
+                </div>
+                <div className="bg-slate-800/50 rounded-xl p-4 text-center">
+                  <div className="w-12 h-12 rounded-full bg-yellow-500/20 flex items-center justify-center mx-auto mb-2">
+                    <Clock className="w-6 h-6 text-yellow-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-yellow-400">{rispActions.held_count}</p>
+                  <p className="text-sm text-slate-400">On Hold</p>
+                </div>
+                <div className="bg-slate-800/50 rounded-xl p-4 text-center">
+                  <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-2">
+                    <X className="w-6 h-6 text-red-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-red-400">{rispActions.blocked_count}</p>
+                  <p className="text-sm text-slate-400">Blocked</p>
+                </div>
+                <div className="bg-slate-800/50 rounded-xl p-4 text-center">
+                  <div className="w-12 h-12 rounded-full bg-cyan-500/20 flex items-center justify-center mx-auto mb-2">
+                    <DollarSign className="w-6 h-6 text-cyan-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-cyan-400">{fmt(rispActions.total_approved_savings)}</p>
+                  <p className="text-sm text-slate-400">Approved Savings</p>
+                </div>
+              </div>
+              {rispActions.approved_count + rispActions.held_count + rispActions.blocked_count > 0 && (
+                <div className="mt-4 p-3 bg-slate-800/30 rounded-lg">
+                  <p className="text-sm text-slate-400">
+                    <span className="text-white font-medium">{rispActions.approved_count + rispActions.held_count + rispActions.blocked_count}</span> total recommendations reviewed. 
+                    <span className="text-green-400 ml-2">{rispActions.approved_count > 0 ? `${Math.round(rispActions.approved_count / (rispActions.approved_count + rispActions.held_count + rispActions.blocked_count) * 100)}% approval rate` : 'No approvals yet'}</span>
+                  </p>
+                </div>
+              )}
+            </div>
+
             {/* Conversational AI Section with Query Buttons on Left */}
             <div className="grid grid-cols-4 gap-6">
               {/* Left Panel - Query Buttons */}
@@ -1219,10 +1324,48 @@ function App() {
                 <div className="grid grid-cols-6 gap-3">
                   <input type="text" placeholder="Evaluation name (e.g., Snowflake POC)" value={newEvaluation.name} onChange={e => setNewEvaluation(prev => ({ ...prev, name: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
                   <input type="text" placeholder="Vendor" value={newEvaluation.vendor} onChange={e => setNewEvaluation(prev => ({ ...prev, vendor: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
-                  <select value={newEvaluation.workload_id} onChange={e => setNewEvaluation(prev => ({ ...prev, workload_id: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white">
-                    <option value="">Select Workload</option>
-                    {workloads.map((w: any) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                  </select>
+                                    <select value={newEvaluation.workload_id} onChange={async (e) => {
+                                        const val = e.target.value
+                                        if (val.startsWith('new:')) {
+                                          // Create new workload from resource
+                                          const resourceName = val.replace('new:', '')
+                                          const rec = recommendations.find((r: any) => r.resource === resourceName)
+                                          try {
+                                            const res = await fetch(`${API_URL}/api/workloads`, {
+                                              method: 'POST',
+                                              headers: { 'Content-Type': 'application/json' },
+                                              body: JSON.stringify({
+                                                name: resourceName,
+                                                description: `Workload for ${rec?.type || 'resource'} - ${resourceName}`,
+                                                criticality: rec?.stability >= 95 ? 'high' : rec?.stability >= 85 ? 'medium' : 'low',
+                                                owner: 'FinOps Team',
+                                                azure_services: [rec?.type || 'Virtual Machines'],
+                                                monthly_cost: rec?.ea_price || rec?.monthly_cost || 0
+                                              })
+                                            })
+                                            const data = await res.json()
+                                            if (data.id) {
+                                              toast.success(`Workload "${resourceName}" created`)
+                                              await fetchData()
+                                              setNewEvaluation(prev => ({ ...prev, workload_id: data.id }))
+                                            }
+                                          } catch (err) {
+                                            toast.error('Failed to create workload')
+                                          }
+                                        } else {
+                                          setNewEvaluation(prev => ({ ...prev, workload_id: val }))
+                                        }
+                                      }} className="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white">
+                                      <option value="">Select Workload or Resource</option>
+                                      {workloads.length > 0 && <optgroup label="Registered Workloads">
+                                        {workloads.map((w: any) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                                      </optgroup>}
+                                      <optgroup label="Create from Resource">
+                                        {recommendations.filter((r: any) => !workloads.some((w: any) => w.name === r.resource)).map((r: any, i: number) => (
+                                          <option key={`new-${i}`} value={`new:${r.resource}`}>{r.resource} ({r.type})</option>
+                                        ))}
+                                      </optgroup>
+                                    </select>
                   <input type="date" placeholder="Decision Date" value={newEvaluation.decision_date} onChange={e => setNewEvaluation(prev => ({ ...prev, decision_date: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-400">Adoption:</span>
@@ -1244,39 +1387,49 @@ function App() {
                 </div>
               </div>
               <p className="text-sm text-slate-400 mb-4">Click any row to open the deep-dive drawer with AI analysis, workload context, and override options.</p>
-              <table className="w-full">
-                <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-800"><th className="pb-3">Resource</th><th className="pb-3">Workload</th><th className="pb-3">Type</th><th className="pb-3">Monthly Cost</th><th className="pb-3">Risk</th><th className="pb-3">Action</th><th className="pb-3">Reason</th><th className="pb-3">Re-evaluate By</th></tr></thead>
-                <tbody>
-                  {(getAllSmartRecs().length > 0 ? getAllSmartRecs() : recommendations).map((r: any, i: number) => (
-                    <tr key={i} onClick={() => openRecommendationDrawer(r)} className="border-b border-slate-800/50 text-sm hover:bg-slate-800/40 cursor-pointer">
-                      <td className="py-4 font-medium text-white">{r.resource || r.sku || r.resource_id?.split('/').pop() || 'Resource'}</td>
-                      <td className="py-4">{r.workload?.name ? <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">{r.workload.name}</span> : <span className="text-slate-500 text-xs">Unassigned</span>}</td>
-                      <td className="py-4 text-slate-400">{r.type || r.recommendation_type || 'RI'}</td>
-                      <td className="py-4 text-white">${(r.monthly_cost || r.net_savings || 0).toLocaleString()}</td>
-                      <td className="py-4">
-                        {r.intelligence?.risk_score !== undefined || r.agent_analysis?.risk_score !== undefined ? (
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${(r.intelligence?.risk_score || r.agent_analysis?.risk_score || 0) <= 3 ? 'bg-green-500/20 text-green-400' : (r.intelligence?.risk_score || r.agent_analysis?.risk_score || 0) <= 6 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>
-                            {(r.intelligence?.risk_score || r.agent_analysis?.risk_score || 0).toFixed(1)}/10
-                          </span>
-                        ) : <span className="text-slate-500 text-xs">-</span>}
-                      </td>
-                      <td className="py-4">
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${
-                          (r._action || r.intelligence?.action) === 'approve' ? 'bg-green-500/20 text-green-400' :
-                          (r._action || r.intelligence?.action) === 'modify' ? 'bg-blue-500/20 text-blue-400' :
-                          (r._action || r.intelligence?.action) === 'hold' ? 'bg-yellow-500/20 text-yellow-400' :
-                          (r._action || r.intelligence?.action) === 'block' ? 'bg-red-500/20 text-red-400' :
-                          'bg-green-500/20 text-green-400'
-                        }`}>
-                          {(r._action || r.intelligence?.action || r.recommendation || 'APPROVE').toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="py-4 text-slate-400 text-xs max-w-xs truncate">{r.intelligence?.reason || r.intelligence?.evaluation_name || '-'}</td>
-                      <td className="py-4">{r.evaluation?.decision_date || r.intelligence?.decision_date ? <span className="px-2 py-1 bg-amber-500/20 text-amber-400 text-xs rounded">{r.evaluation?.decision_date || r.intelligence?.decision_date}</span> : <span className="text-slate-500 text-xs">-</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                            <table className="w-full">
+                              <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-800"><th className="pb-3">Resource</th><th className="pb-3">Workload</th><th className="pb-3">Type</th><th className="pb-3">Monthly Cost</th><th className="pb-3">Risk</th><th className="pb-3">AI Action</th><th className="pb-3">Reason</th><th className="pb-3">Re-evaluate By</th><th className="pb-3">Your Decision</th></tr></thead>
+                              <tbody>
+                                {(getAllSmartRecs().length > 0 ? getAllSmartRecs() : recommendations).map((r: any, i: number) => (
+                                  <tr key={i} className="border-b border-slate-800/50 text-sm hover:bg-slate-800/40">
+                                    <td className="py-4 font-medium text-white cursor-pointer" onClick={() => openRecommendationDrawer(r)}>{r.resource || r.sku || r.resource_id?.split('/').pop() || 'Resource'}</td>
+                                    <td className="py-4">{(() => {
+                                      const matchedWorkload = workloads.find((w: any) => w.name === r.resource || r.workload?.name === w.name)
+                                      return matchedWorkload ? <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">{matchedWorkload.name}</span> : r.workload?.name ? <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">{r.workload.name}</span> : <span className="text-slate-500 text-xs">Unassigned</span>
+                                    })()}</td>
+                                    <td className="py-4 text-slate-400">{r.type || r.recommendation_type || 'RI'}</td>
+                                    <td className="py-4 text-white">${(r.monthly_cost || r.net_savings || 0).toLocaleString()}</td>
+                                    <td className="py-4">
+                                      {r.intelligence?.risk_score !== undefined || r.agent_analysis?.risk_score !== undefined ? (
+                                        <span className={`px-2 py-1 rounded text-xs font-medium ${(r.intelligence?.risk_score || r.agent_analysis?.risk_score || 0) <= 3 ? 'bg-green-500/20 text-green-400' : (r.intelligence?.risk_score || r.agent_analysis?.risk_score || 0) <= 6 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>
+                                          {(r.intelligence?.risk_score || r.agent_analysis?.risk_score || 0).toFixed(1)}/10
+                                        </span>
+                                      ) : <span className="text-slate-500 text-xs">-</span>}
+                                    </td>
+                                    <td className="py-4">
+                                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                        (r._action || r.intelligence?.action) === 'approve' ? 'bg-green-500/20 text-green-400' :
+                                        (r._action || r.intelligence?.action) === 'modify' ? 'bg-blue-500/20 text-blue-400' :
+                                        (r._action || r.intelligence?.action) === 'hold' ? 'bg-yellow-500/20 text-yellow-400' :
+                                        (r._action || r.intelligence?.action) === 'block' ? 'bg-red-500/20 text-red-400' :
+                                        'bg-green-500/20 text-green-400'
+                                      }`}>
+                                        {(r._action || r.intelligence?.action || r.recommendation || 'APPROVE').toUpperCase()}
+                                      </span>
+                                    </td>
+                                    <td className="py-4 text-slate-400 text-xs max-w-xs truncate">{r.intelligence?.reason || r.intelligence?.evaluation_name || '-'}</td>
+                                    <td className="py-4">{r.evaluation?.decision_date || r.intelligence?.decision_date ? <span className="px-2 py-1 bg-amber-500/20 text-amber-400 text-xs rounded">{r.evaluation?.decision_date || r.intelligence?.decision_date}</span> : <span className="text-slate-500 text-xs">-</span>}</td>
+                                    <td className="py-4">
+                                      <div className="flex items-center gap-1">
+                                        <button onClick={(e) => { e.stopPropagation(); recordRispAction('approve', r) }} className="px-2 py-1 bg-green-500/20 hover:bg-green-500/40 text-green-400 text-xs rounded transition-colors" title="Approve this recommendation">Approve</button>
+                                        <button onClick={(e) => { e.stopPropagation(); recordRispAction('hold', r) }} className="px-2 py-1 bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-400 text-xs rounded transition-colors" title="Put on hold">Hold</button>
+                                        <button onClick={(e) => { e.stopPropagation(); recordRispAction('block', r) }} className="px-2 py-1 bg-red-500/20 hover:bg-red-500/40 text-red-400 text-xs rounded transition-colors" title="Block this recommendation">Block</button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
             </div>
 
             {/* Workload Registry */}
@@ -1611,6 +1764,55 @@ function App() {
                           )}
                         </div>
                       </div>
+                    </div>
+
+                    {/* Discount Settings for RI/SP Pricing */}
+                    <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                      <div className="flex items-center gap-3 mb-6"><DollarSign className="w-5 h-5 text-green-400" /><h3 className="font-semibold text-white">RI/SP Discount Settings</h3></div>
+                      <p className="text-sm text-slate-400 mb-4">Configure discount percentages for EA, Reserved Instances, and Savings Plans. Changes will recalculate all pricing in the RI/SP Optimizer.</p>
+                      <div className="grid grid-cols-5 gap-4 mb-4">
+                        <div className="bg-slate-800/50 rounded-xl p-4">
+                          <p className="text-sm font-medium text-white mb-2">EA Discount</p>
+                          <div className="flex items-center gap-2">
+                            <input type="number" min="0" max="50" value={discountSettings.ea_discount} onChange={(e) => setDiscountSettings(prev => ({...prev, ea_discount: Number(e.target.value)}))} className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+                            <span className="text-slate-400">%</span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1">Off list price</p>
+                        </div>
+                        <div className="bg-slate-800/50 rounded-xl p-4">
+                          <p className="text-sm font-medium text-white mb-2">RI 1-Year</p>
+                          <div className="flex items-center gap-2">
+                            <input type="number" min="0" max="80" value={discountSettings.ri_1year_discount} onChange={(e) => setDiscountSettings(prev => ({...prev, ri_1year_discount: Number(e.target.value)}))} className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+                            <span className="text-slate-400">%</span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1">Off EA price</p>
+                        </div>
+                        <div className="bg-slate-800/50 rounded-xl p-4">
+                          <p className="text-sm font-medium text-white mb-2">RI 3-Year</p>
+                          <div className="flex items-center gap-2">
+                            <input type="number" min="0" max="80" value={discountSettings.ri_3year_discount} onChange={(e) => setDiscountSettings(prev => ({...prev, ri_3year_discount: Number(e.target.value)}))} className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+                            <span className="text-slate-400">%</span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1">Off EA price</p>
+                        </div>
+                        <div className="bg-slate-800/50 rounded-xl p-4">
+                          <p className="text-sm font-medium text-white mb-2">SP 1-Year</p>
+                          <div className="flex items-center gap-2">
+                            <input type="number" min="0" max="80" value={discountSettings.sp_1year_discount} onChange={(e) => setDiscountSettings(prev => ({...prev, sp_1year_discount: Number(e.target.value)}))} className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+                            <span className="text-slate-400">%</span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1">Off EA price</p>
+                        </div>
+                        <div className="bg-slate-800/50 rounded-xl p-4">
+                          <p className="text-sm font-medium text-white mb-2">SP 3-Year</p>
+                          <div className="flex items-center gap-2">
+                            <input type="number" min="0" max="80" value={discountSettings.sp_3year_discount} onChange={(e) => setDiscountSettings(prev => ({...prev, sp_3year_discount: Number(e.target.value)}))} className="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+                            <span className="text-slate-400">%</span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-1">Off EA price</p>
+                        </div>
+                      </div>
+                      <button onClick={saveDiscountSettings} className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition-colors">Save Discount Settings</button>
                     </div>
 
                     {/* Phase 2: Background Jobs Status */}

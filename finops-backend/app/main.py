@@ -1071,22 +1071,28 @@ async def get_agents():
 # RI/SP Recommendations
 @app.get("/api/recommendations")
 async def get_recommendations():
+    # Use configurable discount settings
+    EA_DISCOUNT = discount_settings["ea_discount"] / 100
+    RI_1Y_DISCOUNT = discount_settings["ri_1year_discount"] / 100
+    RI_3Y_DISCOUNT = discount_settings["ri_3year_discount"] / 100
+    SP_1Y_DISCOUNT = discount_settings["sp_1year_discount"] / 100
+    SP_3Y_DISCOUNT = discount_settings["sp_3year_discount"] / 100
+    
     # Check for offline imported data first
     if offline_data_store["source"] == "imported" and offline_data_store["ri_recommendations"]:
-        EA_DISCOUNT = 0.12
         recommendations = []
         for rec in offline_data_store["ri_recommendations"]:
             # Transform offline data to match expected response format
             msrp = rec["current_monthly_cost"] / (1 - EA_DISCOUNT)  # Back-calculate MSRP from EA price
             ea_price = rec["current_monthly_cost"]
             
-            # Determine discounts based on term and type
+            # Determine discounts based on term and type (use configurable values)
             if "3-Year" in rec["term"]:
-                ri_discount = 0.56
-                sp_discount = 0.52
+                ri_discount = RI_3Y_DISCOUNT
+                sp_discount = SP_3Y_DISCOUNT
             else:
-                ri_discount = 0.36
-                sp_discount = 0.33
+                ri_discount = RI_1Y_DISCOUNT
+                sp_discount = SP_1Y_DISCOUNT
             
             ri_price = ea_price * (1 - ri_discount)
             sp_price = ea_price * (1 - sp_discount)
@@ -1126,16 +1132,8 @@ async def get_recommendations():
         ''')
         rows = await cursor.fetchall()
         
-        # Pricing structure for AdventHealth:
-        # 1. MSRP (List Price) - Azure retail price
-        # 2. EA Price = MSRP - 12% (AdventHealth Enterprise Agreement discount)
-        # 3. RI/SP discounts are applied ON TOP of EA price:
-        #    - 1-Year RI: 36% off EA price
-        #    - 3-Year RI: 56% off EA price
-        #    - 1-Year SP: 33% off EA price
-        #    - 3-Year SP: 52% off EA price
-        
-        EA_DISCOUNT = 0.12  # AdventHealth's 12% Enterprise Agreement discount
+        # Pricing structure uses configurable discount settings
+        # EA/RI/SP discounts are now configurable via /api/discount-settings
         
         recommendations = []
         for row in rows:
@@ -1143,23 +1141,22 @@ async def get_recommendations():
             msrp = vm["monthly_cost"]  # This is the MSRP/List price
             rec = vm["recommendation"]
             
-            # Calculate EA price (PAYG with 12% discount)
+            # Calculate EA price using configurable discount
             ea_price = msrp * (1 - EA_DISCOUNT)
             
-            # Calculate RI/SP discounts based on recommendation type
-            # These are applied ON TOP of the EA price
+            # Calculate RI/SP discounts based on recommendation type (use configurable values)
             if "3-Year RI" in rec:
-                ri_discount = 0.56
-                sp_discount = 0.52
+                ri_discount = RI_3Y_DISCOUNT
+                sp_discount = SP_3Y_DISCOUNT
             elif "1-Year RI" in rec:
-                ri_discount = 0.36
-                sp_discount = 0.33
+                ri_discount = RI_1Y_DISCOUNT
+                sp_discount = SP_1Y_DISCOUNT
             elif "3-Year SP" in rec:
-                ri_discount = 0.56
-                sp_discount = 0.52
+                ri_discount = RI_3Y_DISCOUNT
+                sp_discount = SP_3Y_DISCOUNT
             else:  # 1-Year SP or other
-                ri_discount = 0.36
-                sp_discount = 0.33
+                ri_discount = RI_1Y_DISCOUNT
+                sp_discount = SP_1Y_DISCOUNT
             
             # Final prices with RI/SP applied to EA price
             ri_price = ea_price * (1 - ri_discount)
@@ -1177,8 +1174,8 @@ async def get_recommendations():
                 "resource": vm["name"],
                 "type": vm["vm_type"],
                 "msrp": round(msrp, 0),  # List price
-                "ea_price": round(ea_price, 0),  # PAYG + 12% EA discount (current price)
-                "ea_discount": "12%",
+                "ea_price": round(ea_price, 0),  # PAYG + EA discount (current price)
+                "ea_discount": f"{int(EA_DISCOUNT * 100)}%",
                 "ri_price": round(ri_price, 0),  # With RI on top of EA
                 "sp_price": round(sp_price, 0),  # With SP on top of EA
                 "ri_discount": f"{int(ri_discount * 100)}%",
@@ -1702,6 +1699,22 @@ circuit_breaker_settings = {
     "ai-token-overrun": {"enabled": True, "threshold": 2000000, "unit": "tokens/hr", "action": "fallback-model"}
 }
 
+# Discount settings - configurable EA, RI, and SP discount percentages
+discount_settings = {
+    "ea_discount": 12,  # Enterprise Agreement discount (default 12%)
+    "ri_1year_discount": 36,  # 1-Year Reserved Instance discount
+    "ri_3year_discount": 56,  # 3-Year Reserved Instance discount
+    "sp_1year_discount": 33,  # 1-Year Savings Plan discount
+    "sp_3year_discount": 52,  # 3-Year Savings Plan discount
+}
+
+# RI/SP Action tracking for Executive Summary
+risp_actions = {
+    "approved": [],  # List of approved recommendations
+    "held": [],      # List of held recommendations
+    "blocked": [],   # List of blocked recommendations
+}
+
 @app.get("/api/circuit-breakers")
 async def get_circuit_breakers():
     return circuit_breaker_settings
@@ -1712,6 +1725,63 @@ async def update_circuit_breaker(breaker_id: str, settings: dict):
         circuit_breaker_settings[breaker_id].update(settings)
         return {"success": True, "settings": circuit_breaker_settings[breaker_id]}
     return {"success": False, "message": f"Circuit breaker '{breaker_id}' not found"}
+
+# Discount settings endpoints
+@app.get("/api/discount-settings")
+async def get_discount_settings():
+    """Get current discount percentages for EA, RI, and SP."""
+    return discount_settings
+
+@app.put("/api/discount-settings")
+async def update_discount_settings(settings: dict):
+    """Update discount percentages. All values should be percentages (e.g., 12 for 12%)."""
+    for key in ["ea_discount", "ri_1year_discount", "ri_3year_discount", "sp_1year_discount", "sp_3year_discount"]:
+        if key in settings:
+            discount_settings[key] = float(settings[key])
+    return {"success": True, "settings": discount_settings}
+
+# RI/SP Action tracking endpoints
+@app.get("/api/risp-actions")
+async def get_risp_actions():
+    """Get RI/SP action summary for Executive Summary."""
+    return {
+        "approved_count": len(risp_actions["approved"]),
+        "held_count": len(risp_actions["held"]),
+        "blocked_count": len(risp_actions["blocked"]),
+        "approved": risp_actions["approved"],
+        "held": risp_actions["held"],
+        "blocked": risp_actions["blocked"],
+        "total_approved_savings": sum(r.get("savings", 0) for r in risp_actions["approved"]),
+    }
+
+@app.post("/api/risp-actions/{action}")
+async def record_risp_action(action: str, recommendation: dict):
+    """Record an RI/SP action (approve, hold, block)."""
+    if action not in ["approve", "hold", "block"]:
+        return {"success": False, "message": f"Invalid action: {action}"}
+    
+    action_map = {"approve": "approved", "hold": "held", "block": "blocked"}
+    action_list = action_map[action]
+    
+    # Add timestamp to the recommendation
+    recommendation["action_timestamp"] = datetime.utcnow().isoformat()
+    recommendation["action"] = action
+    
+    # Remove from other lists if exists
+    for lst in ["approved", "held", "blocked"]:
+        risp_actions[lst] = [r for r in risp_actions[lst] if r.get("resource") != recommendation.get("resource")]
+    
+    # Add to appropriate list
+    risp_actions[action_list].append(recommendation)
+    
+    return {"success": True, "action": action, "recommendation": recommendation}
+
+@app.delete("/api/risp-actions/{resource}")
+async def remove_risp_action(resource: str):
+    """Remove an RI/SP action by resource name."""
+    for lst in ["approved", "held", "blocked"]:
+        risp_actions[lst] = [r for r in risp_actions[lst] if r.get("resource") != resource]
+    return {"success": True, "message": f"Removed actions for {resource}"}
 
 
 # ============ LIVE AZURE DATA ENDPOINTS (Phase 1) ============
