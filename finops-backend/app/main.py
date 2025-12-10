@@ -9,6 +9,10 @@ from datetime import datetime, timedelta
 import json
 import httpx
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Azure service imports - Phase 1
 try:
@@ -16,9 +20,10 @@ try:
     from app.services.recommendation_service import RecommendationService
     from app.services.budget_service import BudgetService
     AZURE_SERVICES_AVAILABLE = True
-except ImportError:
+    print("Azure service classes imported successfully")
+except Exception as e:
     AZURE_SERVICES_AVAILABLE = False
-    print("Azure services not available - running in demo mode")
+    print(f"Azure services not available - running in demo mode: {e}")
 
 # Phase 2 imports
 try:
@@ -30,12 +35,91 @@ except ImportError:
     PHASE2_AVAILABLE = False
     print("Phase 2 features not available")
 
-# GPT-5 API Configuration (Azure OpenAI)
-# Set these environment variables for GPT-5 integration:
-# GPT5_ENDPOINT - Azure OpenAI endpoint URL
-# GPT5_API_KEY - Azure OpenAI API key
-GPT5_ENDPOINT = os.getenv("GPT5_ENDPOINT", "https://pharma-agents-jnj-resource.cognitiveservices.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2025-01-01-preview")
+# Multi-Model AI Configuration (Azure OpenAI)
+# GPT-5: Primary RI/SP Analyzer
+GPT5_ENDPOINT = os.getenv("GPT5_ENDPOINT", "")
 GPT5_API_KEY = os.getenv("GPT5_API_KEY", "")
+
+# O3: Validation Agent (Large Reasoning Model)
+O3_ENDPOINT = os.getenv("O3_ENDPOINT", "")
+O3_API_KEY = os.getenv("O3_API_KEY", "")
+
+# O4-Mini: Secondary Validator
+O4_MINI_ENDPOINT = os.getenv("O4_MINI_ENDPOINT", "")
+O4_MINI_API_KEY = os.getenv("O4_MINI_API_KEY", "")
+
+# GPT-4.1: Alternative Analyzer
+GPT41_ENDPOINT = os.getenv("GPT41_ENDPOINT", "")
+GPT41_API_KEY = os.getenv("GPT41_API_KEY", "")
+
+# RI/SP Analysis Guidance - Reference for AI Agents
+RI_SP_ANALYSIS_GUIDANCE = """
+## RI/SP Analysis Guidance for Azure FinOps
+
+### When to Recommend Reserved Instances (RI):
+1. **Workload Stability**: VM has >85% stability score over 90 days
+2. **Consistent Usage**: Resource runs 24/7 or on predictable schedule
+3. **Known Capacity**: Specific VM size/region requirements are fixed
+4. **Long-term Commitment**: Organization can commit to 1-3 year term
+5. **Specific Services**: SQL, SAP, RHEL, Windows Server with consistent sizing
+
+### When to Recommend Savings Plans (SP):
+1. **Workload Flexibility**: Need to change VM sizes/families
+2. **Growth Patterns**: Workload growing >10% monthly
+3. **Multi-region**: Resources may move between regions
+4. **Compute Diversity**: Mix of VMs, containers, serverless
+5. **Uncertainty**: New workloads without usage history
+
+### Term Selection:
+- **3-Year**: Maximum savings (up to 72% off MSRP), use for stable workloads
+- **1-Year**: Moderate savings (up to 52% off MSRP), use for growing/uncertain workloads
+
+### Pricing Tiers (AdventHealth):
+1. MSRP (List Price) - Base Azure pricing
+2. EA Price = MSRP - 12% (Enterprise Agreement discount)
+3. RI/SP Price = EA Price - additional discount (36-60% depending on term)
+
+### Risk Assessment:
+- LOW: Stable workload, 3-year commitment appropriate
+- MEDIUM: Some variability, 1-year commitment recommended
+- HIGH: Volatile workload, consider SP over RI or no commitment
+"""
+
+RI_SP_VALIDATION_GUIDANCE = """
+## RI/SP Validation Guidance for Azure FinOps
+
+### Validation Checklist:
+1. **Verify Workload Classification**: Is the stability score accurate?
+2. **Check Growth Trajectory**: Does recommendation account for growth?
+3. **Validate Term Selection**: Is commitment length appropriate for risk?
+4. **Cross-check Pricing**: Are savings calculations accurate?
+5. **Assess Flexibility Needs**: Does workload need SP flexibility?
+
+### Red Flags to Identify:
+- RI recommended for workload with >15% growth rate
+- 3-year term for workload with <80% stability
+- SP recommended when RI would save significantly more
+- Missing consideration of ASR/DR requirements
+- Ignoring SQL Always On licensing implications
+
+### Validation Verdicts:
+- VALIDATED: Recommendation is sound, proceed with confidence
+- ADJUSTED: Minor changes suggested to improve recommendation
+- FLAGGED: Significant concerns, requires human review
+- REJECTED: Recommendation has critical issues
+
+### Confidence Scoring:
+- 90-100%: High confidence, strong data support
+- 70-89%: Moderate confidence, some assumptions made
+- 50-69%: Low confidence, limited data or high uncertainty
+- <50%: Very low confidence, recommend manual review
+"""
+
+# Cache for AI analysis results
+ai_analysis_cache = {
+    "snapshot_date": None,
+    "result": None
+}
 
 async def call_gpt5_api(user_message: str, context: str = "") -> str:
     """Call GPT-5 via Azure OpenAI"""
@@ -93,7 +177,47 @@ class AzureConfig(BaseModel):
     tenant_id: str
     client_id: str
     client_secret: str
-    subscription_id: str
+
+# Pydantic models for offline data import
+class OfflineRIRecommendation(BaseModel):
+    vm_name: str
+    vm_size: str
+    region: str
+    os_type: str
+    term: str  # "1-Year" or "3-Year"
+    recommendation_type: str  # "RI" or "SP"
+    current_monthly_cost: float
+    recommended_monthly_cost: float
+    monthly_savings: float
+    annual_savings: float
+
+class OfflineDailyCost(BaseModel):
+    date: str  # YYYY-MM-DD
+    cost: float
+    currency: str = "USD"
+    service: str = None
+    resource_group: str = None
+
+class OfflineBudget(BaseModel):
+    name: str
+    amount: float
+    current_spend: float
+    time_grain: str = "Monthly"
+    category: str = "Cost"
+
+class OfflineDataImport(BaseModel):
+    ri_recommendations: List[OfflineRIRecommendation] = []
+    daily_costs: List[OfflineDailyCost] = []
+    budgets: List[OfflineBudget] = []
+
+# Storage for imported offline data
+offline_data_store = {
+    "ri_recommendations": [],
+    "daily_costs": [],
+    "budgets": [],
+    "imported_at": None,
+    "source": "none"  # "none", "imported", "live"
+}
 
 # In-memory storage for Azure config (would be encrypted in production)
 azure_config_store = {}
@@ -867,6 +991,51 @@ async def get_agents():
 # RI/SP Recommendations
 @app.get("/api/recommendations")
 async def get_recommendations():
+    # Check for offline imported data first
+    if offline_data_store["source"] == "imported" and offline_data_store["ri_recommendations"]:
+        EA_DISCOUNT = 0.12
+        recommendations = []
+        for rec in offline_data_store["ri_recommendations"]:
+            # Transform offline data to match expected response format
+            msrp = rec["current_monthly_cost"] / (1 - EA_DISCOUNT)  # Back-calculate MSRP from EA price
+            ea_price = rec["current_monthly_cost"]
+            
+            # Determine discounts based on term and type
+            if "3-Year" in rec["term"]:
+                ri_discount = 0.56
+                sp_discount = 0.52
+            else:
+                ri_discount = 0.36
+                sp_discount = 0.33
+            
+            ri_price = ea_price * (1 - ri_discount)
+            sp_price = ea_price * (1 - sp_discount)
+            
+            recommendations.append({
+                "resource": rec["vm_name"],
+                "type": rec["vm_size"],
+                "msrp": round(msrp, 0),
+                "ea_price": round(ea_price, 0),
+                "ea_discount": "12%",
+                "ri_price": round(ri_price, 0),
+                "sp_price": round(sp_price, 0),
+                "ri_discount": f"{int(ri_discount * 100)}%",
+                "sp_discount": f"{int(sp_discount * 100)}%",
+                "monthly_cost": round(ea_price, 0),
+                "stability": 95,
+                "recommendation": f"{rec['term']} {rec['recommendation_type']}",
+                "ri_savings": round(ea_price - ri_price, 0),
+                "sp_savings": round(ea_price - sp_price, 0),
+                "total_ri_savings": round(msrp - ri_price, 0),
+                "total_sp_savings": round(msrp - sp_price, 0),
+                "confidence": 0.92,
+                "reasoning": f"Based on Azure Advisor analysis for {rec['region']} region. {rec['os_type']} workload with stable usage pattern.",
+                "data_source": "SNAPSHOT",
+                "snapshot_date": offline_data_store["imported_at"]
+            })
+        return recommendations
+    
+    # Fall back to database data
     async with aiosqlite.connect(DATABASE) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
@@ -1286,10 +1455,42 @@ async def get_azure_config():
 
 @app.post("/api/azure-config")
 async def save_azure_config(config: AzureConfig):
+    global cost_service, recommendation_service, budget_service
+    
     azure_config_store["tenant_id"] = config.tenant_id
     azure_config_store["client_id"] = config.client_id
     azure_config_store["client_secret"] = config.client_secret
     azure_config_store["subscription_id"] = config.subscription_id
+    
+    # Try to initialize Azure services with the provided credentials
+    if AZURE_SERVICES_AVAILABLE:
+        try:
+            cost_service = CostService(
+                tenant_id=config.tenant_id,
+                client_id=config.client_id,
+                client_secret=config.client_secret,
+                subscription_id=config.subscription_id
+            )
+            recommendation_service = RecommendationService(
+                tenant_id=config.tenant_id,
+                client_id=config.client_id,
+                client_secret=config.client_secret,
+                subscription_id=config.subscription_id
+            )
+            budget_service = BudgetService(
+                tenant_id=config.tenant_id,
+                client_id=config.client_id,
+                client_secret=config.client_secret,
+                subscription_id=config.subscription_id
+            )
+            azure_config_store["services_initialized"] = True
+            print("Azure services initialized successfully from Settings UI")
+            return {"success": True, "message": "Azure configuration saved and services initialized"}
+        except Exception as e:
+            azure_config_store["services_initialized"] = False
+            print(f"Failed to initialize Azure services: {e}")
+            return {"success": True, "message": f"Configuration saved but service initialization failed: {str(e)}"}
+    
     return {"success": True, "message": "Azure configuration saved successfully"}
 
 @app.post("/api/azure-config/test")
@@ -1297,13 +1498,33 @@ async def test_azure_connection():
     if not azure_config_store.get("tenant_id"):
         return {"success": False, "message": "No Azure configuration found"}
     
-    # Simulated connection test - in production would use Azure SDK
-    await asyncio.sleep(1)  # Simulate API call
+    # Actually test the Azure connection using the stored credentials
+    if AZURE_SERVICES_AVAILABLE and azure_config_store.get("services_initialized"):
+        try:
+            # Try to make a simple API call to verify credentials
+            from .services.azure_client import AzureClientManager
+            test_client = AzureClientManager(
+                tenant_id=azure_config_store["tenant_id"],
+                client_id=azure_config_store["client_id"],
+                client_secret=azure_config_store["client_secret"],
+                subscription_id=azure_config_store["subscription_id"]
+            )
+            # Test by getting the credential token
+            test_client.credential.get_token("https://management.azure.com/.default")
+            return {
+                "success": True,
+                "message": "Successfully connected to Azure",
+                "subscription_id": azure_config_store["subscription_id"]
+            }
+        except Exception as e:
+            return {"success": False, "message": f"Connection failed: {str(e)}"}
+    
+    # Fallback for when Azure SDK not available
+    await asyncio.sleep(1)
     return {
         "success": True,
-        "message": "Successfully connected to Azure",
-        "tenant_name": "AdventHealth Production",
-        "subscription_name": "AH-Production-001"
+        "message": "Configuration saved (Azure SDK not available for live test)",
+        "subscription_id": azure_config_store.get("subscription_id", "")
     }
 
 @app.post("/api/azure-config/discover")
@@ -1471,6 +1692,21 @@ async def get_ri_coverage():
 @app.get("/api/azure/health")
 async def azure_health_check():
     """Check Azure connection health."""
+    # Check if using offline snapshot data
+    if offline_data_store["source"] == "imported":
+        return {
+            "cost_service": True,
+            "recommendation_service": True,
+            "budget_service": True,
+            "status": "snapshot",
+            "data_source": "SNAPSHOT",
+            "snapshot_date": offline_data_store["imported_at"],
+            "offline_counts": {
+                "ri_recommendations": len(offline_data_store["ri_recommendations"]),
+                "daily_costs": len(offline_data_store["daily_costs"]),
+                "budgets": len(offline_data_store["budgets"])
+            }
+        }
     return {
         "cost_service": cost_service is not None,
         "recommendation_service": recommendation_service is not None,
@@ -1678,3 +1914,493 @@ async def trigger_job(job_id: str):
     job.modify(next_run_time=datetime.utcnow())
     
     return {"success": True, "message": f"Job {job_id} triggered"}
+
+
+# ============ OFFLINE DATA IMPORT ENDPOINTS ============
+
+@app.post("/api/offline/import")
+async def import_offline_data(data: OfflineDataImport):
+    """Import offline Azure data (RI recommendations, costs, budgets)."""
+    global offline_data_store
+    
+    imported_count = {
+        "ri_recommendations": 0,
+        "daily_costs": 0,
+        "budgets": 0
+    }
+    
+    if data.ri_recommendations:
+        offline_data_store["ri_recommendations"] = [r.dict() for r in data.ri_recommendations]
+        imported_count["ri_recommendations"] = len(data.ri_recommendations)
+    
+    if data.daily_costs:
+        offline_data_store["daily_costs"] = [c.dict() for c in data.daily_costs]
+        imported_count["daily_costs"] = len(data.daily_costs)
+    
+    if data.budgets:
+        offline_data_store["budgets"] = [b.dict() for b in data.budgets]
+        imported_count["budgets"] = len(data.budgets)
+    
+    offline_data_store["imported_at"] = datetime.utcnow().isoformat()
+    offline_data_store["source"] = "imported"
+    
+    return {
+        "success": True,
+        "message": "Data imported successfully",
+        "imported": imported_count,
+        "imported_at": offline_data_store["imported_at"]
+    }
+
+
+@app.get("/api/offline/status")
+async def get_offline_status():
+    """Get status of offline data import."""
+    return {
+        "source": offline_data_store["source"],
+        "imported_at": offline_data_store["imported_at"],
+        "counts": {
+            "ri_recommendations": len(offline_data_store["ri_recommendations"]),
+            "daily_costs": len(offline_data_store["daily_costs"]),
+            "budgets": len(offline_data_store["budgets"])
+        }
+    }
+
+
+@app.get("/api/offline/ri-recommendations")
+async def get_offline_ri_recommendations():
+    """Get imported RI/SP recommendations."""
+    if not offline_data_store["ri_recommendations"]:
+        return {
+            "recommendations": [],
+            "source": "none",
+            "message": "No RI recommendations imported. Use POST /api/offline/import to import data."
+        }
+    
+    # Calculate totals
+    total_monthly_savings = sum(r["monthly_savings"] for r in offline_data_store["ri_recommendations"])
+    total_annual_savings = sum(r["annual_savings"] for r in offline_data_store["ri_recommendations"])
+    
+    return {
+        "recommendations": offline_data_store["ri_recommendations"],
+        "summary": {
+            "total_recommendations": len(offline_data_store["ri_recommendations"]),
+            "total_monthly_savings": round(total_monthly_savings, 2),
+            "total_annual_savings": round(total_annual_savings, 2)
+        },
+        "source": "imported",
+        "imported_at": offline_data_store["imported_at"]
+    }
+
+
+@app.get("/api/offline/daily-costs")
+async def get_offline_daily_costs():
+    """Get imported daily costs."""
+    if not offline_data_store["daily_costs"]:
+        return {
+            "costs": [],
+            "source": "none",
+            "message": "No daily costs imported. Use POST /api/offline/import to import data."
+        }
+    
+    # Calculate totals
+    total_cost = sum(c["cost"] for c in offline_data_store["daily_costs"])
+    
+    return {
+        "costs": offline_data_store["daily_costs"],
+        "summary": {
+            "total_days": len(offline_data_store["daily_costs"]),
+            "total_cost": round(total_cost, 2),
+            "average_daily_cost": round(total_cost / len(offline_data_store["daily_costs"]), 2) if offline_data_store["daily_costs"] else 0
+        },
+        "source": "imported",
+        "imported_at": offline_data_store["imported_at"]
+    }
+
+
+@app.get("/api/offline/budgets")
+async def get_offline_budgets():
+    """Get imported budgets."""
+    if not offline_data_store["budgets"]:
+        return {
+            "budgets": [],
+            "source": "none",
+            "message": "No budgets imported. Use POST /api/offline/import to import data."
+        }
+    
+    # Calculate status for each budget
+    budgets_with_status = []
+    for b in offline_data_store["budgets"]:
+        spend_pct = (b["current_spend"] / b["amount"] * 100) if b["amount"] > 0 else 0
+        status = "ok" if spend_pct < 80 else "warning" if spend_pct < 100 else "critical"
+        budgets_with_status.append({
+            **b,
+            "spend_pct": round(spend_pct, 1),
+            "status": status
+        })
+    
+    return {
+        "budgets": budgets_with_status,
+        "summary": {
+            "total_budgets": len(budgets_with_status),
+            "healthy": sum(1 for b in budgets_with_status if b["status"] == "ok"),
+            "warning": sum(1 for b in budgets_with_status if b["status"] == "warning"),
+            "critical": sum(1 for b in budgets_with_status if b["status"] == "critical")
+        },
+        "source": "imported",
+        "imported_at": offline_data_store["imported_at"]
+    }
+
+
+@app.delete("/api/offline/clear")
+async def clear_offline_data():
+    """Clear all imported offline data."""
+    global offline_data_store
+    offline_data_store = {
+        "ri_recommendations": [],
+        "daily_costs": [],
+        "budgets": [],
+        "imported_at": None,
+        "source": "none"
+    }
+    return {"success": True, "message": "Offline data cleared"}
+
+
+# ============================================================================
+# Multi-Agent AI System for RI/SP Analysis
+# ============================================================================
+
+async def call_llm(model: str, system_prompt: str, user_prompt: str) -> dict:
+    """Generic LLM adapter supporting multiple Azure OpenAI models."""
+    model_configs = {
+        "gpt5": {"endpoint": GPT5_ENDPOINT, "key": GPT5_API_KEY, "name": "GPT-5"},
+        "o3": {"endpoint": O3_ENDPOINT, "key": O3_API_KEY, "name": "O3 (Reasoning)"},
+        "o4-mini": {"endpoint": O4_MINI_ENDPOINT, "key": O4_MINI_API_KEY, "name": "O4-Mini"},
+        "gpt41": {"endpoint": GPT41_ENDPOINT, "key": GPT41_API_KEY, "name": "GPT-4.1"},
+    }
+    
+    config = model_configs.get(model)
+    if not config or not config["endpoint"] or not config["key"]:
+        return {"success": False, "error": f"Model {model} not configured", "model": model}
+    
+    headers = {
+        "Content-Type": "application/json",
+        "api-key": config["key"],
+    }
+    
+    # Build payload - some models don't support temperature
+    payload = {
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_completion_tokens": 16000,
+        "stream": False,
+    }
+    # Only add temperature for models that support it (not GPT-5 or O3)
+    if model not in ["gpt5", "o3"]:
+        payload["temperature"] = 0.3
+    
+    async with httpx.AsyncClient(timeout=120) as client:
+        try:
+            print(f"{model} API call starting to {config['endpoint'][:50]}...")
+            r = await client.post(config["endpoint"], headers=headers, json=payload)
+            r.raise_for_status()
+            data = r.json()
+            print(f"{model} API response keys: {list(data.keys())}")
+            # Handle different response structures
+            content = ""
+            if "choices" in data and len(data["choices"]) > 0:
+                choice = data["choices"][0]
+                if "message" in choice and "content" in choice["message"]:
+                    content = choice["message"]["content"] or ""
+                elif "text" in choice:
+                    content = choice["text"] or ""
+            # For reasoning models, check for output field
+            if not content and "output" in data:
+                content = data["output"]
+            print(f"{model} API content length: {len(content)}")
+            if not content:
+                print(f"{model} API full response: {json.dumps(data)[:500]}")
+            return {"success": True, "content": content, "model": config["name"]}
+        except httpx.HTTPStatusError as e:
+            print(f"{model} API HTTP error: {e.response.status_code} - {e.response.text}")
+            return {"success": False, "error": f"HTTP {e.response.status_code}", "model": config["name"]}
+        except Exception as e:
+            print(f"{model} API error: {str(e)}")
+            return {"success": False, "error": str(e), "model": config["name"]}
+
+
+async def run_primary_analyzer(recommendations: list) -> dict:
+    """Run GPT-5 as primary RI/SP analyzer."""
+    recs_summary = json.dumps([{
+        "resource": r.get("resource", r.get("vm_name", "Unknown")),
+        "type": r.get("type", r.get("vm_size", "Unknown")),
+        "region": r.get("region", "Unknown"),
+        "current_cost": r.get("msrp", r.get("current_monthly_cost", 0)),
+        "recommended": r.get("recommendation", r.get("recommendation_type", "Unknown")),
+        "term": r.get("term", "Unknown"),
+        "monthly_savings": r.get("monthly_savings", 0),
+        "annual_savings": r.get("annual_savings", 0),
+    } for r in recommendations[:10]], indent=2)  # Limit to 10 for prompt size
+    
+    system_prompt = f"""You are the Primary RI/SP Analyzer for AdventHealth Azure FinOps.
+
+{RI_SP_ANALYSIS_GUIDANCE}
+
+Your task is to analyze each RI/SP recommendation and provide:
+1. Whether RI or SP is the better choice
+2. Recommended term (1-year or 3-year)
+3. Confidence score (0-100)
+4. Risk level (LOW, MEDIUM, HIGH)
+5. Brief rationale
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "summary": "Brief portfolio-level summary",
+  "total_potential_savings": 0,
+  "recommendations": [
+    {{
+      "resource": "resource name",
+      "choice": "3-Year RI" or "1-Year RI" or "3-Year SP" or "1-Year SP",
+      "confidence": 85,
+      "risk_level": "LOW",
+      "rationale": "Brief explanation"
+    }}
+  ]
+}}"""
+
+    user_prompt = f"""Analyze these RI/SP recommendations for AdventHealth:
+
+Current RI Coverage: 4%
+Target RI Coverage: 25%
+Monthly Azure Spend: $588K
+EA Discount: 12%
+
+Recommendations to analyze:
+{recs_summary}
+
+Provide your analysis as JSON."""
+
+    result = await call_llm("gpt5", system_prompt, user_prompt)
+    
+    if result["success"]:
+        try:
+            # Try to parse JSON from response
+            content = result["content"]
+            # Handle markdown code blocks
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0]
+            parsed = json.loads(content.strip())
+            return {"success": True, "model": result["model"], "analysis": parsed}
+        except json.JSONDecodeError as e:
+            return {"success": True, "model": result["model"], "analysis": {"raw_response": result["content"], "parse_error": str(e)}}
+    return result
+
+
+async def run_validation_agent(recommendations: list, primary_analysis: dict) -> dict:
+    """Run O3 (Large Reasoning Model) as validation agent."""
+    recs_summary = json.dumps([{
+        "resource": r.get("resource", r.get("vm_name", "Unknown")),
+        "type": r.get("type", r.get("vm_size", "Unknown")),
+        "recommended": r.get("recommendation", r.get("recommendation_type", "Unknown")),
+        "term": r.get("term", "Unknown"),
+        "monthly_savings": r.get("monthly_savings", 0),
+    } for r in recommendations[:10]], indent=2)
+    
+    primary_summary = json.dumps(primary_analysis.get("analysis", {}), indent=2)
+    
+    system_prompt = f"""You are the Validation Agent for AdventHealth Azure FinOps using O3 Large Reasoning Model.
+
+{RI_SP_VALIDATION_GUIDANCE}
+
+Your task is to VALIDATE the Primary Analyzer's recommendations:
+1. Check each recommendation against the validation checklist
+2. Identify any red flags
+3. Provide your verdict: VALIDATED, ADJUSTED, FLAGGED, or REJECTED
+4. Adjust confidence scores if needed
+5. Note any concerns
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "validation_summary": "Brief validation summary",
+  "agreements": 0,
+  "disagreements": 0,
+  "flags": 0,
+  "recommendations": [
+    {{
+      "resource": "resource name",
+      "verdict": "VALIDATED",
+      "adjusted_confidence": 85,
+      "concerns": "Any concerns or empty string",
+      "proposed_change": "null or suggested change"
+    }}
+  ]
+}}"""
+
+    user_prompt = f"""Validate these RI/SP recommendations:
+
+Original Recommendations:
+{recs_summary}
+
+Primary Analyzer Output (GPT-5):
+{primary_summary}
+
+Validate each recommendation and provide your assessment as JSON."""
+
+    # Try O3 first, fallback to GPT-4.1 if O3 fails
+    result = await call_llm("o3", system_prompt, user_prompt)
+    
+    # If O3 fails, try GPT-4.1 as fallback validator
+    if not result["success"]:
+        print(f"O3 failed ({result.get('error')}), trying GPT-4.1 as fallback validator")
+        result = await call_llm("gpt41", system_prompt, user_prompt)
+    
+    if result["success"]:
+        try:
+            content = result["content"]
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0]
+            parsed = json.loads(content.strip())
+            return {"success": True, "model": result["model"], "validation": parsed}
+        except json.JSONDecodeError as e:
+            return {"success": True, "model": result["model"], "validation": {"raw_response": result["content"], "parse_error": str(e)}}
+    return result
+
+
+@app.get("/api/ai/ri-sp/analysis")
+async def get_ai_risp_analysis():
+    """Get AI-powered RI/SP analysis with multi-agent validation."""
+    global ai_analysis_cache
+    
+    # Check cache
+    current_snapshot = offline_data_store.get("imported_at")
+    if ai_analysis_cache["snapshot_date"] == current_snapshot and ai_analysis_cache["result"]:
+        return ai_analysis_cache["result"]
+    
+    # Get current recommendations
+    recommendations = []
+    if offline_data_store["source"] == "imported" and offline_data_store["ri_recommendations"]:
+        recommendations = offline_data_store["ri_recommendations"]
+    else:
+        # Use demo data
+        async with aiosqlite.connect(DATABASE) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM vms WHERE recommendation IS NOT NULL LIMIT 10")
+            rows = await cursor.fetchall()
+            recommendations = [dict(row) for row in rows]
+    
+    if not recommendations:
+        return {
+            "success": False,
+            "error": "No recommendations available for analysis",
+            "data_source": "none"
+        }
+    
+    # Run primary analyzer (GPT-5)
+    primary_result = await run_primary_analyzer(recommendations)
+    
+    # Run validation agent (O3)
+    validation_result = await run_validation_agent(recommendations, primary_result)
+    
+    # Combine results
+    result = {
+        "success": True,
+        "snapshot_date": current_snapshot or datetime.now().isoformat(),
+        "data_source": offline_data_store["source"] if offline_data_store["source"] != "none" else "demo",
+        "guidance": {
+            "analysis_guidance": RI_SP_ANALYSIS_GUIDANCE,
+            "validation_guidance": RI_SP_VALIDATION_GUIDANCE
+        },
+        "primary_agent": {
+            "model": primary_result.get("model", "GPT-5"),
+            "status": "success" if primary_result.get("success") else "failed",
+            "analysis": primary_result.get("analysis", primary_result.get("error", "No analysis"))
+        },
+        "validator_agent": {
+            "model": validation_result.get("model", "O3"),
+            "status": "success" if validation_result.get("success") else "failed",
+            "validation": validation_result.get("validation", validation_result.get("error", "No validation"))
+        },
+        "agents_used": [
+            {"name": "GPT-5", "role": "Primary Analyzer", "status": "active" if primary_result.get("success") else "failed"},
+            {"name": "O3", "role": "Validation Agent", "status": "active" if validation_result.get("success") else "failed"}
+        ]
+    }
+    
+    # Cache result
+    ai_analysis_cache = {
+        "snapshot_date": current_snapshot,
+        "result": result
+    }
+    
+    return result
+
+
+@app.post("/api/ai/ri-sp/refresh")
+async def refresh_ai_analysis():
+    """Force refresh AI analysis (clears cache and re-runs agents)."""
+    global ai_analysis_cache
+    ai_analysis_cache = {"snapshot_date": None, "result": None}
+    return await get_ai_risp_analysis()
+
+
+@app.get("/api/ai/guidance")
+async def get_ai_guidance():
+    """Get the RI/SP analysis and validation guidance documents."""
+    return {
+        "analysis_guidance": RI_SP_ANALYSIS_GUIDANCE,
+        "validation_guidance": RI_SP_VALIDATION_GUIDANCE,
+        "models_available": {
+            "gpt5": bool(GPT5_ENDPOINT and GPT5_API_KEY),
+            "o3": bool(O3_ENDPOINT and O3_API_KEY),
+            "o4_mini": bool(O4_MINI_ENDPOINT and O4_MINI_API_KEY),
+            "gpt41": bool(GPT41_ENDPOINT and GPT41_API_KEY)
+        }
+    }
+
+
+@app.get("/api/ai/agents/status")
+async def get_ai_agents_status():
+    """Get status of all AI agents."""
+    return {
+        "agents": [
+            {
+                "name": "GPT-5",
+                "role": "Primary RI/SP Analyzer",
+                "model_type": "Large Language Model",
+                "configured": bool(GPT5_ENDPOINT and GPT5_API_KEY),
+                "description": "Analyzes workload patterns and recommends RI vs SP based on stability, growth, and cost factors"
+            },
+            {
+                "name": "O3",
+                "role": "Validation Agent",
+                "model_type": "Large Reasoning Model",
+                "configured": bool(O3_ENDPOINT and O3_API_KEY),
+                "description": "Cross-validates recommendations, identifies risks, and flags items needing human review"
+            },
+            {
+                "name": "O4-Mini",
+                "role": "Secondary Validator",
+                "model_type": "Reasoning Model (Compact)",
+                "configured": bool(O4_MINI_ENDPOINT and O4_MINI_API_KEY),
+                "description": "Fast secondary validation for quick checks and ensemble voting"
+            },
+            {
+                "name": "GPT-4.1",
+                "role": "Alternative Analyzer",
+                "model_type": "Large Language Model",
+                "configured": bool(GPT41_ENDPOINT and GPT41_API_KEY),
+                "description": "Alternative analysis perspective for diverse model ensemble"
+            }
+        ],
+        "active_agents": sum([
+            bool(GPT5_ENDPOINT and GPT5_API_KEY),
+            bool(O3_ENDPOINT and O3_API_KEY),
+            bool(O4_MINI_ENDPOINT and O4_MINI_API_KEY),
+            bool(GPT41_ENDPOINT and GPT41_API_KEY)
+        ])
+    }

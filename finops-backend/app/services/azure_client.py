@@ -1,6 +1,7 @@
 """
 Azure client wrapper for Cost Management and Advisor APIs.
 Uses service principal authentication.
+Supports both environment variables and dynamic credential injection.
 """
 import os
 from datetime import datetime, timedelta
@@ -14,14 +15,16 @@ from azure.mgmt.consumption import ConsumptionManagementClient
 class AzureClientManager:
     """Manages Azure SDK client connections."""
     
-    def __init__(self):
-        self.tenant_id = os.getenv("AZURE_TENANT_ID")
-        self.client_id = os.getenv("AZURE_CLIENT_ID")
-        self.client_secret = os.getenv("AZURE_CLIENT_SECRET")
-        self.subscription_id = os.getenv("AZURE_SUBSCRIPTION_ID")
+    def __init__(self, tenant_id: str = None, client_id: str = None, 
+                 client_secret: str = None, subscription_id: str = None):
+        # Use provided credentials or fall back to environment variables
+        self.tenant_id = tenant_id or os.getenv("AZURE_TENANT_ID")
+        self.client_id = client_id or os.getenv("AZURE_CLIENT_ID")
+        self.client_secret = client_secret or os.getenv("AZURE_CLIENT_SECRET")
+        self.subscription_id = subscription_id or os.getenv("AZURE_SUBSCRIPTION_ID")
         
         if not all([self.tenant_id, self.client_id, self.client_secret, self.subscription_id]):
-            raise ValueError("Missing required Azure environment variables")
+            raise ValueError("Missing required Azure credentials")
         
         self._credential = None
         self._cost_client = None
