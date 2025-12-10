@@ -14,10 +14,21 @@ import os
 try:
     from app.services.cost_service import CostService
     from app.services.recommendation_service import RecommendationService
+    from app.services.budget_service import BudgetService
     AZURE_SERVICES_AVAILABLE = True
 except ImportError:
     AZURE_SERVICES_AVAILABLE = False
     print("Azure services not available - running in demo mode")
+
+# Phase 2 imports
+try:
+    from app.database import init_history_db, get_db
+    from app.scheduler import start_scheduler, stop_scheduler, get_scheduler
+    from app.models.cost_history import DailyCostHistory, AnomalyRecord, BudgetStatus
+    PHASE2_AVAILABLE = True
+except ImportError:
+    PHASE2_AVAILABLE = False
+    print("Phase 2 features not available")
 
 # GPT-5 API Configuration (Azure OpenAI)
 # Set these environment variables for GPT-5 integration:
@@ -476,21 +487,42 @@ async def seed_data(db):
 # Global Azure service instances (Phase 1)
 cost_service = None
 recommendation_service = None
+budget_service = None
 
 @app.on_event("startup")
 async def startup():
-    global cost_service, recommendation_service
+    global cost_service, recommendation_service, budget_service
     await init_db()
+    
+    # Initialize Phase 2 database if available
+    if PHASE2_AVAILABLE:
+        try:
+            init_history_db()
+            print("Phase 2 history database initialized")
+        except Exception as e:
+            print(f"Phase 2 database init failed: {e}")
     
     # Initialize Azure services if available and configured
     if AZURE_SERVICES_AVAILABLE:
         try:
             cost_service = CostService()
             recommendation_service = RecommendationService()
+            budget_service = BudgetService()
             print("Azure services initialized successfully")
+            
+            # Start background scheduler if Phase 2 available
+            if PHASE2_AVAILABLE:
+                await start_scheduler()
+                print("Background scheduler started with 4 jobs")
         except Exception as e:
             print(f"Azure services not configured: {e}")
             print("Running in demo mode with mock data")
+
+@app.on_event("shutdown")
+async def shutdown():
+    if PHASE2_AVAILABLE:
+        await stop_scheduler()
+        print("Scheduler stopped")
 
 @app.get("/healthz")
 async def healthz():
@@ -1442,5 +1474,207 @@ async def azure_health_check():
     return {
         "cost_service": cost_service is not None,
         "recommendation_service": recommendation_service is not None,
+        "budget_service": budget_service is not None,
         "status": "connected" if cost_service else "demo_mode"
     }
+
+
+# ============ PHASE 2: HISTORICAL DATA ENDPOINTS ============
+
+@app.get("/api/history/daily-costs")
+async def get_historical_daily_costs(days: int = 30):
+    """Get historical daily costs from local database."""
+    if not PHASE2_AVAILABLE:
+        raise HTTPException(503, "Phase 2 features not available")
+    
+    from datetime import date, timedelta
+    
+    with get_db() as db:
+        cutoff = date.today() - timedelta(days=days)
+        records = db.query(DailyCostHistory).filter(
+            DailyCostHistory.date >= cutoff
+        ).order_by(DailyCostHistory.date.asc()).all()
+        
+        return {
+            "data": [
+                {
+                    "date": r.date.isoformat(),
+                    "cost": r.total_cost,
+                    "currency": r.currency
+                }
+                for r in records
+            ],
+            "source": "history",
+            "record_count": len(records)
+        }
+
+
+@app.get("/api/history/cost-trend")
+async def get_cost_trend(days: int = 90):
+    """Get cost trend with week-over-week comparison."""
+    if not PHASE2_AVAILABLE:
+        raise HTTPException(503, "Phase 2 features not available")
+    
+    from datetime import date, timedelta
+    
+    with get_db() as db:
+        cutoff = date.today() - timedelta(days=days)
+        records = db.query(DailyCostHistory).filter(
+            DailyCostHistory.date >= cutoff
+        ).order_by(DailyCostHistory.date.asc()).all()
+        
+        if not records:
+            return {"data": [], "trend": "insufficient_data"}
+        
+        # Calculate weekly averages
+        weekly_data = {}
+        for r in records:
+            week = r.date.isocalendar()[1]
+            year = r.date.year
+            key = f"{year}-W{week:02d}"
+            if key not in weekly_data:
+                weekly_data[key] = []
+            weekly_data[key].append(r.total_cost)
+        
+        weekly_avgs = {k: sum(v)/len(v) for k, v in weekly_data.items()}
+        weeks = sorted(weekly_avgs.keys())
+        
+        # Calculate trend
+        if len(weeks) >= 2:
+            last_week = weekly_avgs[weeks[-1]]
+            prev_week = weekly_avgs[weeks[-2]]
+            wow_change = ((last_week - prev_week) / prev_week * 100) if prev_week > 0 else 0
+            trend = "up" if wow_change > 5 else "down" if wow_change < -5 else "stable"
+        else:
+            wow_change = 0
+            trend = "insufficient_data"
+        
+        return {
+            "weekly_averages": [{"week": k, "avg_cost": round(v, 2)} for k, v in weekly_avgs.items()],
+            "trend": trend,
+            "wow_change_pct": round(wow_change, 1),
+            "total_days": len(records)
+        }
+
+
+# ============ PHASE 2: ANOMALY ENDPOINTS ============
+
+@app.get("/api/anomalies")
+async def get_detected_anomalies(status: str = None, days: int = 30):
+    """Get detected anomalies."""
+    if not PHASE2_AVAILABLE:
+        raise HTTPException(503, "Phase 2 features not available")
+    
+    from datetime import date, timedelta
+    
+    with get_db() as db:
+        cutoff = date.today() - timedelta(days=days)
+        query = db.query(AnomalyRecord).filter(
+            AnomalyRecord.anomaly_date >= cutoff
+        )
+        
+        if status:
+            query = query.filter(AnomalyRecord.status == status)
+        
+        records = query.order_by(AnomalyRecord.detected_at.desc()).all()
+        
+        return {
+            "anomalies": [
+                {
+                    "id": r.id,
+                    "date": r.anomaly_date.isoformat(),
+                    "metric": r.metric,
+                    "actual": r.actual_value,
+                    "baseline": r.baseline_value,
+                    "variance_pct": r.variance_pct,
+                    "variance_amount": r.variance_amount,
+                    "severity": r.severity,
+                    "status": r.status,
+                    "root_cause": r.root_cause,
+                    "detected_at": r.detected_at.isoformat()
+                }
+                for r in records
+            ],
+            "total": len(records),
+            "open_count": sum(1 for r in records if r.status == "open")
+        }
+
+
+@app.patch("/api/anomalies/{anomaly_id}")
+async def update_anomaly(anomaly_id: int, status: str = None, root_cause: str = None):
+    """Update anomaly status or root cause."""
+    if not PHASE2_AVAILABLE:
+        raise HTTPException(503, "Phase 2 features not available")
+    
+    with get_db() as db:
+        record = db.query(AnomalyRecord).filter(AnomalyRecord.id == anomaly_id).first()
+        if not record:
+            raise HTTPException(404, "Anomaly not found")
+        
+        if status:
+            record.status = status
+            if status == "resolved":
+                record.resolved_at = datetime.utcnow()
+        
+        if root_cause:
+            record.root_cause = root_cause
+        
+        db.commit()
+        
+        return {"success": True, "anomaly_id": anomaly_id}
+
+
+# ============ PHASE 2: BUDGET ENDPOINTS ============
+
+@app.get("/api/azure/budgets")
+async def get_azure_budgets():
+    """Get Azure Budget status."""
+    if budget_service is None:
+        raise HTTPException(503, "Budget service not configured")
+    try:
+        return budget_service.get_budget_summary()
+    except Exception as e:
+        raise HTTPException(500, f"Error fetching budgets: {str(e)}")
+
+
+# ============ PHASE 2: SCHEDULER STATUS ============
+
+@app.get("/api/scheduler/status")
+async def get_scheduler_status():
+    """Get background job status."""
+    if not PHASE2_AVAILABLE:
+        raise HTTPException(503, "Phase 2 features not available")
+    
+    sched = get_scheduler()
+    jobs = []
+    
+    for job in sched.get_jobs():
+        jobs.append({
+            "id": job.id,
+            "name": job.name,
+            "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
+            "trigger": str(job.trigger)
+        })
+    
+    return {
+        "running": sched.running,
+        "jobs": jobs
+    }
+
+
+@app.post("/api/scheduler/trigger/{job_id}")
+async def trigger_job(job_id: str):
+    """Manually trigger a background job."""
+    if not PHASE2_AVAILABLE:
+        raise HTTPException(503, "Phase 2 features not available")
+    
+    sched = get_scheduler()
+    job = sched.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    
+    # Run immediately
+    job.modify(next_run_time=datetime.utcnow())
+    
+    return {"success": True, "message": f"Job {job_id} triggered"}
