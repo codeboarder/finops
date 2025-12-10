@@ -54,6 +54,12 @@ function App() {
                 const [csvInput, setCsvInput] = useState('')
                 const [isImporting, setIsImporting] = useState(false)
                 const [importStatus, setImportStatus] = useState<any>(null)
+                const [alertSettings, setAlertSettings] = useState({
+                  anomaly: { enabled: true, threshold: 15 },
+                  budget: { enabled: true, warningThreshold: 80, criticalThreshold: 90 },
+                  circuitBreaker: { enabled: true, threshold: 500 },
+                  costSpike: { enabled: true, threshold: 25 }
+                })
 
               const fetchData = useCallback(async () => {
             try {
@@ -1173,6 +1179,89 @@ function App() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    </div>
+
+                    {/* Alert Configuration with Sliders and Toggles */}
+                    <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                      <div className="flex items-center gap-3 mb-6"><Bell className="w-5 h-5 text-yellow-400" /><h3 className="font-semibold text-white">Alert Configuration</h3></div>
+                      <div className="space-y-6">
+                        {/* Anomaly Detection Alerts */}
+                        <div className="bg-slate-800/50 rounded-xl p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <AlertTriangle className="w-5 h-5 text-orange-400" />
+                              <div><p className="font-medium text-white">Anomaly Detection</p><p className="text-xs text-slate-400">Alert when cost variance exceeds threshold</p></div>
+                            </div>
+                            <button onClick={() => setAlertSettings(prev => ({...prev, anomaly: {...prev.anomaly, enabled: !prev.anomaly.enabled}}))} className={`w-12 h-6 rounded-full p-1 transition-colors ${alertSettings.anomaly.enabled ? 'bg-green-500' : 'bg-slate-700'}`}><div className={`w-4 h-4 rounded-full bg-white transition-transform ${alertSettings.anomaly.enabled ? 'translate-x-6' : ''}`} /></button>
+                          </div>
+                          {alertSettings.anomaly.enabled && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-sm"><span className="text-slate-400">Variance Threshold</span><span className="text-white font-medium">{alertSettings.anomaly.threshold}%</span></div>
+                              <input type="range" min="5" max="50" value={alertSettings.anomaly.threshold} onChange={(e) => setAlertSettings(prev => ({...prev, anomaly: {...prev.anomaly, threshold: Number(e.target.value)}}))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-orange-500" />
+                              <div className="flex justify-between text-xs text-slate-500"><span>5%</span><span>50%</span></div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Budget Alerts */}
+                        <div className="bg-slate-800/50 rounded-xl p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <DollarSign className="w-5 h-5 text-green-400" />
+                              <div><p className="font-medium text-white">Budget Alerts</p><p className="text-xs text-slate-400">Alert when budget utilization reaches thresholds</p></div>
+                            </div>
+                            <button onClick={() => setAlertSettings(prev => ({...prev, budget: {...prev.budget, enabled: !prev.budget.enabled}}))} className={`w-12 h-6 rounded-full p-1 transition-colors ${alertSettings.budget.enabled ? 'bg-green-500' : 'bg-slate-700'}`}><div className={`w-4 h-4 rounded-full bg-white transition-transform ${alertSettings.budget.enabled ? 'translate-x-6' : ''}`} /></button>
+                          </div>
+                          {alertSettings.budget.enabled && (
+                            <div className="space-y-4">
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between text-sm"><span className="text-yellow-400">Warning Threshold</span><span className="text-white font-medium">{alertSettings.budget.warningThreshold}%</span></div>
+                                <input type="range" min="50" max="95" value={alertSettings.budget.warningThreshold} onChange={(e) => setAlertSettings(prev => ({...prev, budget: {...prev.budget, warningThreshold: Number(e.target.value)}}))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-yellow-500" />
+                              </div>
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between text-sm"><span className="text-red-400">Critical Threshold</span><span className="text-white font-medium">{alertSettings.budget.criticalThreshold}%</span></div>
+                                <input type="range" min="60" max="100" value={alertSettings.budget.criticalThreshold} onChange={(e) => setAlertSettings(prev => ({...prev, budget: {...prev.budget, criticalThreshold: Number(e.target.value)}}))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-red-500" />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Circuit Breaker Alerts */}
+                        <div className="bg-slate-800/50 rounded-xl p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <Zap className="w-5 h-5 text-red-400" />
+                              <div><p className="font-medium text-white">Circuit Breaker Alerts</p><p className="text-xs text-slate-400">Alert when cost rate triggers circuit breaker</p></div>
+                            </div>
+                            <button onClick={() => setAlertSettings(prev => ({...prev, circuitBreaker: {...prev.circuitBreaker, enabled: !prev.circuitBreaker.enabled}}))} className={`w-12 h-6 rounded-full p-1 transition-colors ${alertSettings.circuitBreaker.enabled ? 'bg-green-500' : 'bg-slate-700'}`}><div className={`w-4 h-4 rounded-full bg-white transition-transform ${alertSettings.circuitBreaker.enabled ? 'translate-x-6' : ''}`} /></button>
+                          </div>
+                          {alertSettings.circuitBreaker.enabled && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-sm"><span className="text-slate-400">Cost Rate Threshold</span><span className="text-white font-medium">${alertSettings.circuitBreaker.threshold}/hr</span></div>
+                              <input type="range" min="100" max="2000" step="50" value={alertSettings.circuitBreaker.threshold} onChange={(e) => setAlertSettings(prev => ({...prev, circuitBreaker: {...prev.circuitBreaker, threshold: Number(e.target.value)}}))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-red-500" />
+                              <div className="flex justify-between text-xs text-slate-500"><span>$100/hr</span><span>$2,000/hr</span></div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Cost Spike Alerts */}
+                        <div className="bg-slate-800/50 rounded-xl p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <TrendingUp className="w-5 h-5 text-purple-400" />
+                              <div><p className="font-medium text-white">Cost Spike Alerts</p><p className="text-xs text-slate-400">Alert on sudden cost increases</p></div>
+                            </div>
+                            <button onClick={() => setAlertSettings(prev => ({...prev, costSpike: {...prev.costSpike, enabled: !prev.costSpike.enabled}}))} className={`w-12 h-6 rounded-full p-1 transition-colors ${alertSettings.costSpike.enabled ? 'bg-green-500' : 'bg-slate-700'}`}><div className={`w-4 h-4 rounded-full bg-white transition-transform ${alertSettings.costSpike.enabled ? 'translate-x-6' : ''}`} /></button>
+                          </div>
+                          {alertSettings.costSpike.enabled && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-sm"><span className="text-slate-400">Spike Threshold</span><span className="text-white font-medium">{alertSettings.costSpike.threshold}% increase</span></div>
+                              <input type="range" min="10" max="100" value={alertSettings.costSpike.threshold} onChange={(e) => setAlertSettings(prev => ({...prev, costSpike: {...prev.costSpike, threshold: Number(e.target.value)}}))} className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500" />
+                              <div className="flex justify-between text-xs text-slate-500"><span>10%</span><span>100%</span></div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
 

@@ -1220,7 +1220,7 @@ async def get_variance_data():
         {"day": "Sun", "variance": -0.5},
     ]
 
-# Chat endpoint (simulated AI)
+# Chat endpoint - ALWAYS tries GPT-5 first, falls back to data-aware responses
 @app.post("/api/chat")
 async def chat(message: ChatMessage):
     user_msg = message.message.lower()
@@ -1240,6 +1240,47 @@ async def chat(message: ChatMessage):
         for b in budgets_data:
             if b.get('allocated') and b.get('current'):
                 b['percentage'] = round((b['current'] / b['allocated']) * 100, 1)
+    
+    # Build rich context for GPT-5
+    resolved_anomalies = [a for a in anomalies if a['status'] == 'resolved']
+    critical_budgets = [b for b in budgets_data if b.get('percentage', 0) >= 80]
+    
+    context = f"""ContosoHealth FinOps Dashboard - Live Data Context:
+
+AZURE SPEND:
+- Monthly Azure Cost: $588K ($19.6K daily rate)
+- YTD ACR: $2.83M
+- RI Coverage: 4% (Target: 25%)
+- Monthly Savings Target: $20,000
+
+ANOMALIES (Last 30 Days):
+- Total: {len(anomalies)} detected
+- Resolved: {len(resolved_anomalies)}
+- Top incidents: {', '.join([a['resource'] + ' (' + str(a['cost_impact']) + ')' for a in anomalies[:3]]) if anomalies else 'None'}
+
+BUDGETS:
+- Total budgets: {len(budgets_data)}
+- At risk (>80%): {len(critical_budgets)}
+- Budget details: {', '.join([b['name'] + ' (' + str(b.get('percentage', 0)) + '%)' for b in budgets_data]) if budgets_data else 'None'}
+
+GROWTH TRENDS:
+- 3P GPU: +97.6% MoM ($43K ACR)
+- AVD: +181% YoY ($410K ACR)
+- Azure AI: +199% YoY ($62K ACR)
+
+RI/SP RECOMMENDATIONS:
+- SQL Always On: 3-Year RI recommended (98% stability, $45K/yr savings)
+- AKS Production: 1-Year SP recommended (78% stability, growing workload)
+- GPU Training: Investigate (runaway cost detected)"""
+
+    # ALWAYS try GPT-5 first for ALL queries
+    gpt5_response = await call_gpt5_api(message.message, context)
+    
+    if gpt5_response:
+        return {"response": gpt5_response, "timestamp": datetime.utcnow().isoformat(), "source": "gpt5"}
+    
+    # Fallback to data-aware responses only if GPT-5 fails
+    print("GPT-5 API call failed, falling back to data-aware responses")
     
     # Data-aware responses based on actual database content
     if "anomal" in user_msg or "last month" in user_msg or "incident" in user_msg or "history" in user_msg:
@@ -1399,26 +1440,12 @@ AI Agent Savings This Month:
 Total AI-identified savings: $20,000/month"""
 
     else:
-        # Try to call live Claude API for general questions
-        context = f"""AdventHealth December 2025 MBR Data:
-- Monthly Azure Cost: $588K ($19.6K daily rate)
-- YTD ACR: $2.83M
-- RI Coverage: 4% (Target: 25%)
-- Anomalies: {len(anomalies)} total, {len([a for a in anomalies if a['status'] == 'resolved'])} resolved
-- Budgets: {len([b for b in budgets_data if b.get('percentage', 0) < 80])} healthy, {len([b for b in budgets_data if b.get('percentage', 0) >= 80])} at risk
-- Top growth: 3P GPU +97.6% MoM, AVD +181% YoY, Azure AI +199% YoY"""
-        
-        gpt5_response = await call_gpt5_api(message.message, context)
-        
-        if gpt5_response:
-            response = gpt5_response
-        else:
-            # Fallback if GPT-5 API fails
-            resolved_count = len([a for a in anomalies if a['status'] == 'resolved'])
-            total_count = len([a for a in anomalies if a['status'] != 'dismissed'])
-            response = f"""AdventHealth FinOps AI Assistant (GPT-5)
+        # Generic fallback for unmatched queries (GPT-5 already tried at start)
+        resolved_count = len([a for a in anomalies if a['status'] == 'resolved'])
+        total_count = len([a for a in anomalies if a['status'] != 'dismissed'])
+        response = f"""ContosoHealth FinOps AI Assistant
 
-I have access to your Azure subscription data and can answer questions about:
+I can help you with Azure cost management questions:
 
   - Anomalies: "Show me last month's anomalies" or "How was the GPU spike resolved?"
   - Budgets: "What's our budget status?" or "Which budgets are over 80%?"
@@ -1426,7 +1453,7 @@ I have access to your Azure subscription data and can answer questions about:
   - RI Coverage: "Explain RI coverage recommendations"
   - SQL/Database: "Why 3-year RI for SQL?"
 
-Quick Stats (December 2025 MBR):
+Quick Stats (December 2025):
   - Daily Rate: $19.6K (+22% YoY)
   - YTD ACR: $2.83M
   - Monthly Azure Cost: $588K
@@ -1436,7 +1463,7 @@ Quick Stats (December 2025 MBR):
 
 All recommendations are validated by secondary AI agents for accuracy."""
 
-    return {"response": response, "timestamp": datetime.utcnow().isoformat()}
+    return {"response": response, "timestamp": datetime.utcnow().isoformat(), "source": "fallback"}
 
 # Azure Configuration endpoints
 @app.get("/api/azure-config")
@@ -2404,3 +2431,499 @@ async def get_ai_agents_status():
             bool(GPT41_ENDPOINT and GPT41_API_KEY)
         ])
     }
+
+
+# ============================================================================
+# PHASE 3: WORKLOAD INTELLIGENCE LAYER
+# ============================================================================
+
+# Phase 3 imports
+try:
+    from fastapi import UploadFile, File, Form
+    from app.services.intelligence_service import IntelligenceService
+    from app.services.document_service import DocumentService
+    from app.models.workload_intelligence import (
+        Workload, TechnologyEvaluation, WorkloadContext,
+        WorkloadStatus, EvaluationStatus, CommitmentAction
+    )
+    
+    intelligence_service = IntelligenceService()
+    document_service = DocumentService()
+    PHASE3_AVAILABLE = True
+    print("Phase 3 Workload Intelligence Layer loaded successfully")
+except ImportError as e:
+    PHASE3_AVAILABLE = False
+    intelligence_service = None
+    document_service = None
+    print(f"Phase 3 features not available: {e}")
+
+
+# ============ SMART RECOMMENDATIONS ============
+
+@app.get("/api/recommendations/smart")
+async def get_smart_recommendations():
+    """Get recommendations enriched with workload intelligence."""
+    if not PHASE3_AVAILABLE:
+        return {"error": "Phase 3 not available", "approved": [], "modified": [], "hold": [], "blocked": [], "summary": {}}
+    return intelligence_service.get_smart_recommendations()
+
+
+@app.get("/api/recommendations/{rec_id}/details")
+async def get_recommendation_details(rec_id: str):
+    """Get full details for a single recommendation (for drawer)."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    smart_recs = intelligence_service.get_smart_recommendations()
+    
+    for category in ["approved", "modified", "hold", "blocked"]:
+        for rec in smart_recs.get(category, []):
+            if rec.get("id") == rec_id:
+                return rec
+    
+    raise HTTPException(404, "Recommendation not found")
+
+
+# ============ WORKLOAD REGISTRY ============
+
+@app.get("/api/workloads")
+async def list_workloads():
+    """List all registered workloads."""
+    if not PHASE3_AVAILABLE:
+        return {"workloads": []}
+    
+    with get_db() as db:
+        workloads = db.query(Workload).all()
+        return {
+            "workloads": [
+                {
+                    "id": w.id,
+                    "name": w.name,
+                    "description": w.description,
+                    "status": w.status.value if w.status else None,
+                    "criticality": w.criticality,
+                    "owner_name": w.owner_name,
+                    "owner_email": w.owner_email,
+                    "expected_end_date": w.expected_end_date.isoformat() if w.expected_end_date else None,
+                    "resource_group_patterns": w.resource_group_patterns,
+                    "subscription_ids": w.subscription_ids,
+                    "max_commitment_term_months": w.max_commitment_term_months,
+                    "migration_target": w.migration_target,
+                    "created_at": w.created_at.isoformat() if w.created_at else None
+                }
+                for w in workloads
+            ]
+        }
+
+
+@app.post("/api/workloads")
+async def create_workload(
+    name: str = Form(...),
+    description: str = Form(None),
+    owner_name: str = Form(None),
+    owner_email: str = Form(None),
+    status: str = Form("active"),
+    criticality: str = Form("standard"),
+    resource_group_patterns: str = Form(None),
+    subscription_ids: str = Form(None),
+    max_commitment_term_months: int = Form(None),
+    migration_target: str = Form(None),
+    expected_end_date: str = Form(None),
+    created_by: str = Form("system")
+):
+    """Create a new workload."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    from datetime import date
+    
+    with get_db() as db:
+        workload = Workload(
+            name=name,
+            description=description,
+            owner_name=owner_name,
+            owner_email=owner_email,
+            status=WorkloadStatus(status) if status else WorkloadStatus.ACTIVE,
+            criticality=criticality,
+            resource_group_patterns=json.loads(resource_group_patterns) if resource_group_patterns else None,
+            subscription_ids=json.loads(subscription_ids) if subscription_ids else None,
+            max_commitment_term_months=max_commitment_term_months,
+            migration_target=migration_target,
+            expected_end_date=date.fromisoformat(expected_end_date) if expected_end_date else None,
+            created_by=created_by
+        )
+        db.add(workload)
+        db.commit()
+        db.refresh(workload)
+        
+        return {
+            "id": workload.id,
+            "name": workload.name,
+            "status": workload.status.value if workload.status else None,
+            "message": "Workload created successfully"
+        }
+
+
+@app.get("/api/workloads/{workload_id}")
+async def get_workload(workload_id: int):
+    """Get a single workload by ID."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    with get_db() as db:
+        workload = db.query(Workload).filter(Workload.id == workload_id).first()
+        if not workload:
+            raise HTTPException(404, "Workload not found")
+        
+        return {
+            "id": workload.id,
+            "name": workload.name,
+            "description": workload.description,
+            "status": workload.status.value if workload.status else None,
+            "criticality": workload.criticality,
+            "owner_name": workload.owner_name,
+            "owner_email": workload.owner_email,
+            "expected_end_date": workload.expected_end_date.isoformat() if workload.expected_end_date else None,
+            "resource_group_patterns": workload.resource_group_patterns,
+            "subscription_ids": workload.subscription_ids,
+            "max_commitment_term_months": workload.max_commitment_term_months,
+            "migration_target": workload.migration_target
+        }
+
+
+# ============ TECHNOLOGY EVALUATIONS ============
+
+@app.get("/api/evaluations")
+async def list_evaluations():
+    """List all technology evaluations."""
+    if not PHASE3_AVAILABLE:
+        return {"evaluations": []}
+    
+    with get_db() as db:
+        evaluations = db.query(TechnologyEvaluation).all()
+        return {
+            "evaluations": [
+                {
+                    "id": e.id,
+                    "workload_id": e.workload_id,
+                    "name": e.name,
+                    "vendor": e.vendor,
+                    "evaluation_type": e.evaluation_type,
+                    "status": e.status.value if e.status else None,
+                    "started_date": e.started_date.isoformat() if e.started_date else None,
+                    "decision_date": e.decision_date.isoformat() if e.decision_date else None,
+                    "adoption_probability_pct": e.adoption_probability_pct,
+                    "poc_success_score": e.poc_success_score,
+                    "executive_sponsor": e.executive_sponsor,
+                    "hold_commitments": e.hold_commitments,
+                    "hold_expires": e.hold_expires.isoformat() if e.hold_expires else None,
+                    "affected_azure_services": e.affected_azure_services,
+                    "estimated_monthly_spend_affected": e.estimated_monthly_spend_affected
+                }
+                for e in evaluations
+            ]
+        }
+
+
+@app.post("/api/evaluations")
+async def create_evaluation(
+    workload_id: int = Form(...),
+    name: str = Form(...),
+    vendor: str = Form(...),
+    evaluation_type: str = Form("saas_replacement"),
+    status: str = Form("evaluating"),
+    decision_date: str = Form(None),
+    adoption_probability_pct: int = Form(50),
+    poc_success_score: int = Form(None),
+    poc_notes: str = Form(None),
+    executive_sponsor: str = Form(None),
+    hold_commitments: bool = Form(True),
+    hold_expires: str = Form(None),
+    affected_azure_services: str = Form(None),
+    estimated_monthly_spend_affected: float = Form(None),
+    created_by: str = Form("system")
+):
+    """Create a new technology evaluation."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    from datetime import date
+    
+    with get_db() as db:
+        evaluation = TechnologyEvaluation(
+            workload_id=workload_id,
+            name=name,
+            vendor=vendor,
+            evaluation_type=evaluation_type,
+            status=EvaluationStatus(status) if status else EvaluationStatus.EVALUATING,
+            started_date=date.today(),
+            decision_date=date.fromisoformat(decision_date) if decision_date else None,
+            adoption_probability_pct=adoption_probability_pct,
+            poc_success_score=poc_success_score,
+            poc_notes=poc_notes,
+            executive_sponsor=executive_sponsor,
+            hold_commitments=hold_commitments,
+            hold_expires=date.fromisoformat(hold_expires) if hold_expires else None,
+            affected_azure_services=json.loads(affected_azure_services) if affected_azure_services else None,
+            estimated_monthly_spend_affected=estimated_monthly_spend_affected,
+            created_by=created_by
+        )
+        db.add(evaluation)
+        db.commit()
+        db.refresh(evaluation)
+        
+        return {
+            "id": evaluation.id,
+            "name": evaluation.name,
+            "status": evaluation.status.value if evaluation.status else None,
+            "message": "Evaluation created successfully"
+        }
+
+
+@app.get("/api/evaluations/{evaluation_id}")
+async def get_evaluation(evaluation_id: int):
+    """Get a single evaluation by ID."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    with get_db() as db:
+        evaluation = db.query(TechnologyEvaluation).filter(
+            TechnologyEvaluation.id == evaluation_id
+        ).first()
+        
+        if not evaluation:
+            raise HTTPException(404, "Evaluation not found")
+        
+        return {
+            "id": evaluation.id,
+            "workload_id": evaluation.workload_id,
+            "name": evaluation.name,
+            "vendor": evaluation.vendor,
+            "evaluation_type": evaluation.evaluation_type,
+            "status": evaluation.status.value if evaluation.status else None,
+            "started_date": evaluation.started_date.isoformat() if evaluation.started_date else None,
+            "decision_date": evaluation.decision_date.isoformat() if evaluation.decision_date else None,
+            "adoption_probability_pct": evaluation.adoption_probability_pct,
+            "poc_success_score": evaluation.poc_success_score,
+            "poc_notes": evaluation.poc_notes,
+            "executive_sponsor": evaluation.executive_sponsor,
+            "hold_commitments": evaluation.hold_commitments,
+            "hold_expires": evaluation.hold_expires.isoformat() if evaluation.hold_expires else None,
+            "affected_azure_services": evaluation.affected_azure_services,
+            "estimated_monthly_spend_affected": evaluation.estimated_monthly_spend_affected
+        }
+
+
+# ============ AI ANALYSIS ============
+
+@app.post("/api/evaluations/{evaluation_id}/analyze")
+async def run_evaluation_analysis(evaluation_id: int):
+    """Run SaaS evaluator AI agent on an evaluation."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    try:
+        result = intelligence_service.run_analysis(evaluation_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Analysis failed: {str(e)}")
+
+
+@app.get("/api/intelligence/status")
+async def get_intelligence_status():
+    """Get status of the intelligence layer including RL integration."""
+    if not PHASE3_AVAILABLE:
+        return {"phase3_available": False, "agent_lightning_available": False}
+    
+    return {
+        "phase3_available": True,
+        **intelligence_service.get_agent_status()
+    }
+
+
+# ============ DOCUMENT UPLOADS ============
+
+@app.post("/api/evaluations/{evaluation_id}/documents")
+async def upload_evaluation_document(
+    evaluation_id: int,
+    file: UploadFile = File(...),
+    document_type: str = Form("proposal"),
+    uploaded_by: str = Form("system")
+):
+    """Upload a document for an evaluation."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    try:
+        doc = await document_service.upload_evaluation_document(
+            evaluation_id=evaluation_id,
+            file=file.file,
+            filename=file.filename,
+            document_type=document_type,
+            uploaded_by=uploaded_by
+        )
+        return {
+            "id": doc.id,
+            "filename": doc.original_filename,
+            "file_type": doc.file_type,
+            "file_size_bytes": doc.file_size_bytes,
+            "extraction_status": "completed" if doc.extracted_text else "failed",
+            "message": "Document uploaded successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Upload failed: {str(e)}")
+
+
+@app.post("/api/workloads/{workload_id}/documents")
+async def upload_workload_document(
+    workload_id: int,
+    file: UploadFile = File(...),
+    uploaded_by: str = Form("system")
+):
+    """Upload a document for a workload."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    try:
+        doc = await document_service.upload_workload_document(
+            workload_id=workload_id,
+            file=file.file,
+            filename=file.filename,
+            uploaded_by=uploaded_by
+        )
+        return {
+            "id": doc.id,
+            "filename": doc.original_filename,
+            "file_type": doc.file_type,
+            "file_size_bytes": doc.file_size_bytes,
+            "extraction_status": doc.extraction_status,
+            "message": "Document uploaded successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Upload failed: {str(e)}")
+
+
+# ============ WORKLOAD CONTEXT ============
+
+@app.post("/api/workloads/{workload_id}/context")
+async def add_workload_context(
+    workload_id: int,
+    content: str = Form(...),
+    added_by: str = Form("system")
+):
+    """Add context note to a workload."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    with get_db() as db:
+        context = WorkloadContext(
+            workload_id=workload_id,
+            content=content,
+            added_by=added_by
+        )
+        db.add(context)
+        db.commit()
+        db.refresh(context)
+        
+        return {
+            "id": context.id,
+            "content": context.content,
+            "added_at": context.added_at.isoformat() if context.added_at else None,
+            "message": "Context added successfully"
+        }
+
+
+@app.get("/api/workloads/{workload_id}/context")
+async def get_workload_context(workload_id: int):
+    """Get all context notes for a workload."""
+    if not PHASE3_AVAILABLE:
+        return {"context": []}
+    
+    with get_db() as db:
+        contexts = db.query(WorkloadContext).filter(
+            WorkloadContext.workload_id == workload_id
+        ).order_by(WorkloadContext.added_at.desc()).all()
+        
+        return {
+            "context": [
+                {
+                    "id": c.id,
+                    "content": c.content,
+                    "added_by": c.added_by,
+                    "added_at": c.added_at.isoformat() if c.added_at else None
+                }
+                for c in contexts
+            ]
+        }
+
+
+# ============ MANUAL OVERRIDES ============
+
+@app.post("/api/recommendations/{rec_id}/override")
+async def set_recommendation_override(
+    rec_id: str,
+    action: str = Form(...),
+    reason: str = Form(...),
+    override_by: str = Form("system"),
+    expires_date: str = Form(None)
+):
+    """Set a manual override for a recommendation."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    from datetime import date
+    
+    if action not in ["approve", "modify", "hold", "block"]:
+        raise HTTPException(400, f"Invalid action: {action}. Must be one of: approve, modify, hold, block")
+    
+    try:
+        intel = intelligence_service.set_override(
+            recommendation_id=rec_id,
+            action=action,
+            reason=reason,
+            override_by=override_by,
+            expires_date=date.fromisoformat(expires_date) if expires_date else None
+        )
+        return {
+            "id": intel.id,
+            "azure_recommendation_id": intel.azure_recommendation_id,
+            "override_action": intel.override_action.value if intel.override_action else None,
+            "override_reason": intel.override_reason,
+            "override_by": intel.override_by,
+            "override_expires": intel.override_expires.isoformat() if intel.override_expires else None,
+            "message": "Override set successfully"
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Failed to set override: {str(e)}")
+
+
+# ============ RL FEEDBACK ============
+
+@app.post("/api/analysis/{analysis_id}/feedback")
+async def provide_analysis_feedback(
+    analysis_id: int,
+    feedback: str = Form(...),
+    reward: float = Form(...)
+):
+    """Provide feedback on an AI analysis for RL training."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    if reward < -1 or reward > 1:
+        raise HTTPException(400, "Reward must be between -1 and 1")
+    
+    try:
+        result = intelligence_service.saas_agent.provide_feedback(
+            analysis_id=analysis_id,
+            feedback=feedback,
+            reward=reward
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Failed to record feedback: {str(e)}")

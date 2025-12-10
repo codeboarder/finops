@@ -44,6 +44,30 @@ Before connecting, you need an Azure App Registration with the following permiss
 
 Once connected, the dashboard badge changes from "DEMO DATA" to "LIVE DATA" and all cost information comes directly from Azure Cost Management APIs.
 
+### Conditional Access Exception Process
+
+If your organization uses Azure AD Conditional Access policies, the FinOps Dashboard service principal may be blocked from accessing Azure APIs. You'll see authentication errors like "AADSTS53003: Access has been blocked by Conditional Access policies."
+
+**To request an exception:**
+
+1. **Identify the blocking policy**: Check Azure AD Sign-in logs for the service principal to identify which Conditional Access policy is blocking access.
+
+2. **Submit exception request**: Contact your Azure AD administrator or security team with:
+   - Service Principal Name: "FinOps Dashboard"
+   - Application (Client) ID: Your app registration client ID
+   - Business justification: "Automated cost management and RI/SP optimization for FinOps governance"
+   - Required APIs: Azure Cost Management, Azure Advisor, Azure Consumption
+   - Access pattern: Server-to-server (no user interaction)
+
+3. **Recommended exception approach**:
+   - Create a named location for the FinOps backend server IP
+   - Exclude the FinOps service principal from MFA requirements (it uses client credentials, not user auth)
+   - Or create a dedicated Conditional Access policy that allows the service principal with appropriate controls
+
+4. **Alternative: Use Managed Identity**: If running in Azure (e.g., Azure Container Apps, AKS), use a Managed Identity instead of service principal credentials. Managed Identities are often exempt from Conditional Access policies.
+
+5. **Offline Mode**: While waiting for the exception, use the dashboard's offline import feature to manually upload Azure Advisor exports and still get AI-powered recommendations.
+
 ---
 
 ## What's Working Now
@@ -135,16 +159,58 @@ Click any alert to open the investigation modal:
 
 ---
 
+### Phase 3: Workload Intelligence Layer
+
+The Workload Intelligence Layer adds business context awareness to RI/SP commitment decisions:
+
+**Workload Registry** - Register business applications with their Azure resource mappings:
+- Resource group patterns for automatic matching
+- Workload lifecycle status (active, evaluating, migrating, sunset)
+- Maximum commitment term constraints
+- Owner information for notifications
+
+**Technology Evaluations** - Track SaaS/vendor evaluations that might replace Azure workloads:
+- POC success scores and adoption probability
+- Executive sponsorship tracking
+- Decision dates and hold expiration
+- Affected Azure services and spend
+
+**SaaS Evaluator AI Agent** - Analyzes technology evaluations for commitment risk:
+- Risk score (0-10) based on POC results, executive support, pricing, migration complexity
+- Confidence scoring with reasoning
+- Recommended actions: approve, modify, hold, block
+- Microsoft Agent Lightning integration for RL-based continuous improvement
+
+**Document Service** - Upload and analyze supporting documents:
+- Supports .docx, .pdf, .xlsx, .txt, .csv files
+- Automatic text extraction for AI analysis
+- Links documents to workloads or evaluations
+
+**Smart Recommendations** - Enriched Azure recommendations with intelligence:
+- Automatic workload matching via resource group patterns
+- Blocking evaluation detection
+- Priority-based action determination
+- Manual override support with expiration
+
+New Phase 3 endpoints:
+
+| Endpoint | Description |
+|----------|-------------|
+| `/api/recommendations/smart` | Recommendations with workload intelligence |
+| `/api/recommendations/{id}/details` | Full details for drawer UI |
+| `/api/workloads` | List/create workloads |
+| `/api/evaluations` | List/create technology evaluations |
+| `/api/evaluations/{id}/analyze` | Run SaaS evaluator AI agent |
+| `/api/evaluations/{id}/documents` | Upload evaluation documents |
+| `/api/workloads/{id}/documents` | Upload workload documents |
+| `/api/recommendations/{id}/override` | Set manual override |
+| `/api/intelligence/status` | Intelligence layer status |
+
+---
+
 ## Future Updates (Not Yet Implemented)
 
 These features are planned for future phases:
-
-### Phase 3: Advanced Features
-- Redis caching for improved API performance
-- Azure Resource Graph integration for resource inventory
-- ML-based cost forecasting with Azure ML
-- WebSocket for real-time push updates
-- Expanded anomaly detection algorithms
 
 ### Phase 4: Enterprise Features
 - Multi-subscription support
@@ -152,6 +218,7 @@ These features are planned for future phases:
 - Azure SQL database migration (from SQLite)
 - Custom report builder
 - Slack/Teams integration for alerts
+- Deep-dive drawer UI for recommendation details
 
 ---
 
