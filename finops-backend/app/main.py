@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
@@ -9,6 +9,15 @@ from datetime import datetime, timedelta
 import json
 import httpx
 import os
+
+# Azure service imports - Phase 1
+try:
+    from app.services.cost_service import CostService
+    from app.services.recommendation_service import RecommendationService
+    AZURE_SERVICES_AVAILABLE = True
+except ImportError:
+    AZURE_SERVICES_AVAILABLE = False
+    print("Azure services not available - running in demo mode")
 
 # GPT-5 API Configuration (Azure OpenAI)
 # Set these environment variables for GPT-5 integration:
@@ -464,9 +473,24 @@ async def seed_data(db):
     
     await db.commit()
 
+# Global Azure service instances (Phase 1)
+cost_service = None
+recommendation_service = None
+
 @app.on_event("startup")
 async def startup():
+    global cost_service, recommendation_service
     await init_db()
+    
+    # Initialize Azure services if available and configured
+    if AZURE_SERVICES_AVAILABLE:
+        try:
+            cost_service = CostService()
+            recommendation_service = RecommendationService()
+            print("Azure services initialized successfully")
+        except Exception as e:
+            print(f"Azure services not configured: {e}")
+            print("Running in demo mode with mock data")
 
 @app.get("/healthz")
 async def healthz():
@@ -1328,3 +1352,95 @@ async def update_circuit_breaker(breaker_id: str, settings: dict):
         circuit_breaker_settings[breaker_id].update(settings)
         return {"success": True, "settings": circuit_breaker_settings[breaker_id]}
     return {"success": False, "message": f"Circuit breaker '{breaker_id}' not found"}
+
+
+# ============ LIVE AZURE DATA ENDPOINTS (Phase 1) ============
+
+@app.get("/api/azure/costs/daily")
+async def get_azure_daily_costs(days: int = 30):
+    """Get daily cost breakdown from Azure Cost Management."""
+    if cost_service is None:
+        raise HTTPException(503, "Azure services not configured")
+    try:
+        return {"data": cost_service.get_daily_costs(days), "source": "azure"}
+    except Exception as e:
+        raise HTTPException(500, f"Error fetching costs: {str(e)}")
+
+@app.get("/api/azure/costs/by-service")
+async def get_azure_costs_by_service(days: int = 30):
+    """Get cost breakdown by Azure service."""
+    if cost_service is None:
+        raise HTTPException(503, "Azure services not configured")
+    try:
+        return {"data": cost_service.get_costs_by_service(days), "source": "azure"}
+    except Exception as e:
+        raise HTTPException(500, f"Error fetching costs: {str(e)}")
+
+@app.get("/api/azure/costs/by-resource-group")
+async def get_azure_costs_by_rg(days: int = 30):
+    """Get cost breakdown by resource group."""
+    if cost_service is None:
+        raise HTTPException(503, "Azure services not configured")
+    try:
+        return {"data": cost_service.get_costs_by_resource_group(days), "source": "azure"}
+    except Exception as e:
+        raise HTTPException(500, f"Error fetching costs: {str(e)}")
+
+@app.get("/api/azure/costs/summary")
+async def get_azure_cost_summary():
+    """Get monthly cost summary with MTD and forecast."""
+    if cost_service is None:
+        raise HTTPException(503, "Azure services not configured")
+    try:
+        return {"data": cost_service.get_monthly_summary(), "source": "azure"}
+    except Exception as e:
+        raise HTTPException(500, f"Error fetching summary: {str(e)}")
+
+@app.get("/api/azure/recommendations")
+async def get_azure_recommendations():
+    """Get all RI/SP and Advisor cost recommendations."""
+    if recommendation_service is None:
+        raise HTTPException(503, "Azure services not configured")
+    try:
+        return recommendation_service.get_all_recommendations()
+    except Exception as e:
+        raise HTTPException(500, f"Error fetching recommendations: {str(e)}")
+
+@app.get("/api/azure/recommendations/ri")
+async def get_ri_recommendations():
+    """Get Reserved Instance recommendations."""
+    if recommendation_service is None:
+        raise HTTPException(503, "Azure services not configured")
+    try:
+        return {"data": recommendation_service.get_reservation_recommendations(), "source": "azure"}
+    except Exception as e:
+        raise HTTPException(500, f"Error fetching RI recommendations: {str(e)}")
+
+@app.get("/api/azure/recommendations/advisor")
+async def get_advisor_recommendations():
+    """Get Azure Advisor cost recommendations."""
+    if recommendation_service is None:
+        raise HTTPException(503, "Azure services not configured")
+    try:
+        return {"data": recommendation_service.get_advisor_cost_recommendations(), "source": "azure"}
+    except Exception as e:
+        raise HTTPException(500, f"Error fetching advisor recommendations: {str(e)}")
+
+@app.get("/api/azure/ri-coverage")
+async def get_ri_coverage():
+    """Get current RI coverage percentage."""
+    if recommendation_service is None:
+        raise HTTPException(503, "Azure services not configured")
+    try:
+        return recommendation_service.get_ri_coverage()
+    except Exception as e:
+        raise HTTPException(500, f"Error fetching RI coverage: {str(e)}")
+
+@app.get("/api/azure/health")
+async def azure_health_check():
+    """Check Azure connection health."""
+    return {
+        "cost_service": cost_service is not None,
+        "recommendation_service": recommendation_service is not None,
+        "status": "connected" if cost_service else "demo_mode"
+    }

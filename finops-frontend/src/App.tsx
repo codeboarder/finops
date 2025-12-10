@@ -47,12 +47,22 @@ function App() {
     const [alertModalOpen, setAlertModalOpen] = useState(false)
     const [workflowStep, setWorkflowStep] = useState(0)
     const [investigationRunning, setInvestigationRunning] = useState(false)
-    const [emailStage, setEmailStage] = useState<'idle' | 'preview' | 'sent'>('idle')
+        const [emailStage, setEmailStage] = useState<'idle' | 'preview' | 'sent'>('idle')
+        const [dataSource, setDataSource] = useState<'azure' | 'demo'>('demo')
 
-    const fetchData = useCallback(async () => {
-      try {
-        const endpoints = ['stats', 'agents', 'hidden-costs', 'budgets', 'recommendations', 'controls', 'alert-config', 'mission-critical', 'alerts', 'anomaly-data', 'variance-data', 'forecast', 'azure-config', 'control-settings', 'circuit-breakers']
-        const results = await Promise.all(endpoints.map(e => fetch(`${API_URL}/api/${e}`).then(r => r.json()).catch(() => null)))
+              const fetchData = useCallback(async () => {
+            try {
+              // Check Azure health first
+              try {
+                const healthRes = await fetch(`${API_URL}/api/azure/health`)
+                const health = await healthRes.json()
+                setDataSource(health.status === 'connected' ? 'azure' : 'demo')
+              } catch {
+                setDataSource('demo')
+              }
+        
+              const endpoints = ['stats', 'agents', 'hidden-costs', 'budgets', 'recommendations', 'controls', 'alert-config', 'mission-critical', 'alerts', 'anomaly-data', 'variance-data', 'forecast', 'azure-config', 'control-settings', 'circuit-breakers']
+              const results = await Promise.all(endpoints.map(e => fetch(`${API_URL}/api/${e}`).then(r => r.json()).catch(() => null)))
       
         if (results[0]) setStats(results[0])
         if (results[1]) setAgents(results[1])
@@ -818,8 +828,11 @@ function App() {
             </div>
             <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3"><Sparkles className="w-5 h-5 text-purple-400" /><h3 className="font-semibold text-white">AI-Powered Commitment Recommendations</h3></div>
-                <span className="px-3 py-1 bg-purple-500/20 text-purple-400 text-xs font-medium rounded-full">Commitment Advisor Agent</span>
+                                <div className="flex items-center gap-3"><Sparkles className="w-5 h-5 text-purple-400" /><h3 className="font-semibold text-white">AI-Powered Commitment Recommendations</h3></div>
+                                <div className="flex items-center gap-2">
+                                  <span className={`px-2 py-1 rounded text-xs ${dataSource === 'azure' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{dataSource === 'azure' ? 'LIVE DATA' : 'DEMO DATA'}</span>
+                                  <span className="px-3 py-1 bg-purple-500/20 text-purple-400 text-xs font-medium rounded-full">Commitment Advisor Agent</span>
+                                </div>
               </div>
               <table className="w-full">
                 <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-800"><th className="pb-3">Resource</th><th className="pb-3">Type</th><th className="pb-3">MSRP</th><th className="pb-3">EA Price (12% off)</th><th className="pb-3">RI Price</th><th className="pb-3">SP Price</th><th className="pb-3">Stability</th><th className="pb-3">Recommendation</th><th className="pb-3">Confidence</th></tr></thead>
