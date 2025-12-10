@@ -18,6 +18,7 @@ azure-mgmt-consumption = "^10.0.0"
 python-dotenv = "^1.2.1"
 apscheduler = "^3.11.1"
 sqlalchemy = "^2.0.45"
+six = "^1.17.0"
 
 
 [build-system]

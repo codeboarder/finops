@@ -51,6 +51,9 @@ function App() {
                 const [dataSource, setDataSource] = useState<'azure' | 'demo'>('demo')
                 const [detectedAnomalies, setDetectedAnomalies] = useState<any[]>([])
                 const [schedulerStatus, setSchedulerStatus] = useState<any>(null)
+                const [csvInput, setCsvInput] = useState('')
+                const [isImporting, setIsImporting] = useState(false)
+                const [importStatus, setImportStatus] = useState<any>(null)
 
               const fetchData = useCallback(async () => {
             try {
@@ -357,6 +360,71 @@ function App() {
         setCircuitBreakers((prev: any) => ({ ...prev, [breakerId]: { ...prev[breakerId], threshold } }))
         toast.success('Circuit breaker updated')
       } catch (e) { toast.error('Failed to update') }
+    }
+
+    const importCsvData = async () => {
+      if (!csvInput.trim()) {
+        toast.error('Please paste CSV data first')
+        return
+      }
+      setIsImporting(true)
+      try {
+        // Parse CSV - Azure Advisor format
+        const lines = csvInput.trim().split('\n')
+        const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim())
+        const recommendations: any[] = []
+        
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g)?.map(v => v.replace(/"/g, '').trim()) || []
+          if (values.length < 2) continue
+          
+          const row: any = {}
+          headers.forEach((h, idx) => { row[h] = values[idx] || '' })
+          
+          // Map Azure Advisor CSV to our format
+          const savings = parseFloat(row['Potential Annual Cost Savings'] || row['Annual Savings'] || '0')
+          const monthlySavings = savings / 12
+          
+          recommendations.push({
+            vm_name: row['Resource Name'] || row['Recommendation'] || 'Unknown Resource',
+            vm_size: row['Type'] || 'Compute',
+            region: row['Region'] || 'All Regions',
+            os_type: row['OS Type'] || 'All',
+            term: row['Term'] || '3-Year',
+            recommendation_type: row['Recommendation']?.includes('savings plan') ? 'SP' : 'RI',
+            current_monthly_cost: monthlySavings * 2,
+            recommended_monthly_cost: monthlySavings,
+            monthly_savings: monthlySavings,
+            annual_savings: savings
+          })
+        }
+        
+        if (recommendations.length === 0) {
+          toast.error('No valid recommendations found in CSV')
+          setIsImporting(false)
+          return
+        }
+        
+        const res = await fetch(`${API_URL}/api/offline/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ri_recommendations: recommendations, daily_costs: [], budgets: [] })
+        })
+        const data = await res.json()
+        
+        if (data.success) {
+          setImportStatus(data)
+          toast.success(`Imported ${data.imported.ri_recommendations} recommendations`)
+          setCsvInput('')
+          fetchData()
+        } else {
+          toast.error('Import failed')
+        }
+      } catch (e) {
+        toast.error('Failed to parse CSV')
+        console.error(e)
+      }
+      setIsImporting(false)
     }
 
   const fmt = (v?: number | null) => {
@@ -1026,6 +1094,49 @@ function App() {
                     <Server className="w-12 h-12 mb-3 opacity-50" />
                     <p className="text-sm">No discovery results yet</p>
                     <p className="text-xs mt-1">Connect to Azure and run discovery</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Manual Data Import Section */}
+            <div className="bg-slate-900 rounded-xl border border-slate-800 p-6 col-span-2">
+              <div className="flex items-center gap-3 mb-4">
+                <Layers className="w-5 h-5 text-cyan-400" />
+                <h3 className="font-semibold text-white">Manual Data Import</h3>
+                <div className="group relative">
+                  <span className="text-slate-400 cursor-help text-sm">(How to export from Azure)</span>
+                  <div className="absolute left-0 top-6 w-80 bg-slate-800 border border-slate-700 rounded-lg p-4 text-xs text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none">
+                    <p className="font-semibold text-white mb-2">Export from Azure Portal:</p>
+                    <ol className="list-decimal list-inside space-y-1">
+                      <li>Go to Azure Portal &gt; Advisor</li>
+                      <li>Click "Cost" recommendations</li>
+                      <li>Click "Download as CSV"</li>
+                      <li>Paste the CSV content below</li>
+                    </ol>
+                    <p className="mt-2 text-slate-400">Supports: RI/SP recommendations, Cost data</p>
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400 mb-4">Paste Azure Advisor CSV export to import RI/SP recommendations when live API access is blocked by Conditional Access.</p>
+              <textarea 
+                value={csvInput}
+                onChange={(e) => setCsvInput(e.target.value)}
+                placeholder={`Paste Azure Advisor CSV here...\n\nExample format:\n"Business Impact","Recommendation","Subscription ID",...\n"High","Consider purchasing a savings plan for compute",...`}
+                className="w-full h-32 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 font-mono resize-none"
+              />
+              <div className="flex items-center gap-4 mt-4">
+                <button 
+                  onClick={importCsvData} 
+                  disabled={isImporting || !csvInput.trim()}
+                  className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isImporting ? <><Loader2 className="w-4 h-4 animate-spin" />Importing...</> : <><Layers className="w-4 h-4" />Import CSV Data</>}
+                </button>
+                {importStatus && (
+                  <div className="flex items-center gap-2 text-sm text-green-400">
+                    <CheckCircle className="w-4 h-4" />
+                    <span>Imported {importStatus.imported?.ri_recommendations || 0} recommendations at {new Date(importStatus.imported_at).toLocaleTimeString()}</span>
                   </div>
                 )}
               </div>
