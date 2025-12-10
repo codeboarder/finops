@@ -41,9 +41,21 @@ class SaaSEvaluatorAgent(BaseAgent):
         self.agent_type = "saas_evaluator"
         self.agent_version = "1.0.0"
     
-    def analyze(self, evaluation_id: int) -> Dict[str, Any]:
+    def analyze(
+        self, 
+        evaluation_id: int,
+        trigger: str = "manual",
+        focus_areas: List[str] = None,
+        previous_analysis_id: int = None
+    ) -> Dict[str, Any]:
         """
         Run full analysis on a technology evaluation.
+        
+        Args:
+            evaluation_id: The evaluation to analyze
+            trigger: What triggered this analysis - "new_document", "new_context", "status_change", "manual"
+            focus_areas: Areas to focus on - ["security_review", "timeline", "executive_support", "budget", "poc_metrics"]
+            previous_analysis_id: ID of previous analysis to compare against
         
         Returns:
             {
@@ -55,7 +67,10 @@ class SaaSEvaluatorAgent(BaseAgent):
                 "reasoning": "...",
                 "summary": "...",
                 "validated": true,
-                "rl_trace_id": "..."
+                "rl_trace_id": "...",
+                "delta_explanation": "...",
+                "next_action": "...",
+                "re_evaluate_by": "..."
             }
         """
         start_time = datetime.utcnow()
@@ -71,6 +86,14 @@ class SaaSEvaluatorAgent(BaseAgent):
             
             # Gather all context
             context = self._gather_context(db, evaluation)
+            
+            # Add re-evaluation metadata to context
+            context['re_evaluation'] = {
+                'trigger': trigger,
+                'focus_areas': focus_areas or [],
+                'previous_analysis_id': previous_analysis_id,
+                'is_re_evaluation': previous_analysis_id is not None or trigger != "manual"
+            }
             
             # Build prompts
             system_prompt = self._get_system_prompt()
@@ -126,7 +149,13 @@ class SaaSEvaluatorAgent(BaseAgent):
                 "validation_notes": validation_result.get("notes") if validation_result else None,
                 "rl_trace_id": rl_trace_id,
                 "duration_ms": duration_ms,
-                "agent_lightning_enabled": AGENT_LIGHTNING_AVAILABLE
+                "agent_lightning_enabled": AGENT_LIGHTNING_AVAILABLE,
+                # New re-evaluation fields
+                "delta_explanation": result.get("delta_explanation", ""),
+                "next_action": result.get("next_action", ""),
+                "re_evaluate_by": result.get("re_evaluate_by", ""),
+                "trigger": trigger,
+                "is_re_evaluation": context['re_evaluation']['is_re_evaluation']
             }
     
     def _validate_analysis(self, primary_result: Dict, context: Dict) -> Optional[Dict]:
@@ -263,6 +292,59 @@ You analyze:
 6. Document content (proposals, security reviews, TCO analyses)
 7. User-provided context and notes
 
+## RE-EVALUATION INSTRUCTIONS
+
+When re-evaluating a recommendation after new context or documents are added:
+
+1. COMPARE to previous analysis:
+   - Note what changed (new documents, new context, updated evaluation status)
+   - Explicitly state if risk score increased or decreased and why
+
+2. WEIGHT recent information higher:
+   - Context added in last 7 days: 1.5x weight
+   - Documents uploaded in last 7 days: 1.5x weight
+   - Older context/docs: standard weight
+
+3. LOOK FOR signals in new content:
+   - Security review passed → adoption more likely → increase risk score
+   - POC failed/delayed → adoption less likely → decrease risk score
+   - Executive sponsor changed → reassess organizational commitment
+   - Budget approved/rejected → strong signal either direction
+   - Timeline slipped → moderate decrease in adoption probability
+   - Team training started → adoption more likely → increase risk score
+   - Competitive RFP issued → serious evaluation → increase risk score
+
+4. ADJUST adoption probability based on evaluation status:
+   - Planned: 20-40% base
+   - Evaluating: 30-50% base
+   - POC: 40-60% base
+   - Pilot: 60-80% base
+   - Approved: 90%+ 
+   - Rejected: 0% (release hold)
+   - Deferred: 20% (reduce hold urgency)
+
+5. UPDATE recommendation action:
+   - Risk 0-3: approve (safe to commit)
+   - Risk 4-5: modify (shorter term, or SP over RI)
+   - Risk 6-7: hold (wait for decision date)
+   - Risk 8-10: block (do not commit under any circumstances)
+
+6. EXPLAIN the delta:
+   - "Risk increased from 7.2 to 7.8 because: security review passed (+0.6), indicating adoption is more likely"
+   - "Risk decreased from 6.1 to 4.3 because: POC delayed 6 months (-1.2), executive sponsor left company (-0.6)"
+
+7. FLAG contradictions:
+   - If documents say one thing but context says another, note the conflict
+   - Ask for clarification if critical information is ambiguous
+
+8. RECOMMEND next action:
+   - "Re-evaluate after decision date (Mar 15)"
+   - "Request updated POC metrics"
+   - "Confirm executive sponsor commitment"
+   - "Safe to proceed with commitment"
+
+## OUTPUT FORMAT
+
 Output your analysis as JSON with this structure:
 ```json
 {
@@ -273,7 +355,10 @@ Output your analysis as JSON with this structure:
         {"factor": "<name>", "score": <contribution to risk, can be negative>, "reasoning": "<why>"}
     ],
     "reasoning": "<2-3 sentence explanation of your overall assessment>",
-    "summary": "<1 sentence recommendation for display>"
+    "summary": "<1 sentence recommendation for display>",
+    "delta_explanation": "<if re-evaluation, explain what changed from previous analysis>",
+    "next_action": "<recommended next step for the user>",
+    "re_evaluate_by": "<date or trigger for next re-evaluation>"
 }
 ```
 
@@ -290,9 +375,38 @@ is engaged, and timeline is credible, the adoption probability should be weighte
         monthly_spend = context['evaluation']['monthly_spend_affected']
         if monthly_spend is None:
             monthly_spend = 0
+        
+        # Build re-evaluation section if applicable
+        re_eval_section = ""
+        if context.get('re_evaluation', {}).get('is_re_evaluation'):
+            re_eval = context['re_evaluation']
+            trigger_map = {
+                'new_document': 'New document was uploaded',
+                'new_context': 'New context/information was added',
+                'status_change': 'Evaluation status was updated',
+                'manual': 'Manual re-evaluation requested',
+                'decision_date_passed': 'Decision date has passed'
+            }
+            trigger_desc = trigger_map.get(re_eval['trigger'], re_eval['trigger'])
+            
+            focus_section = ""
+            if re_eval['focus_areas']:
+                focus_section = f"\nFocus Areas: {', '.join(re_eval['focus_areas'])}"
+            
+            re_eval_section = f"""
+## RE-EVALUATION CONTEXT
+This is a RE-EVALUATION. Compare to previous analysis and explain what changed.
+Trigger: {trigger_desc}{focus_section}
+
+IMPORTANT: 
+- Weight recent information (last 7 days) at 1.5x
+- Explicitly state if risk score increased or decreased and WHY
+- Include delta_explanation in your response
+- Recommend next_action and re_evaluate_by date
+"""
             
         return f"""Analyze this technology evaluation for commitment risk:
-
+{re_eval_section}
 ## EVALUATION DETAILS
 Name: {context['evaluation']['name']}
 Vendor: {context['evaluation']['vendor']}

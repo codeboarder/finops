@@ -5,7 +5,7 @@ import {
   DollarSign, Bot, Target, Brain, Sparkles, 
   Search, Bell, RefreshCw, Settings, Clock,
   Cloud, Layers, Lock, Key, Globe, Server,
-  Power, Sliders, MessageSquare, Send, X, Save, Play, Loader2
+  Power, Sliders, MessageSquare, Send, X, Save, Play, Loader2, Database
 } from 'lucide-react'
 import { 
   Line, AreaChart, Area, BarChart, Bar, 
@@ -60,6 +60,28 @@ function App() {
                   circuitBreaker: { enabled: true, threshold: 500 },
                   costSpike: { enabled: true, threshold: 25 }
                 })
+                const [smartRecommendations, setSmartRecommendations] = useState<any>(null)
+                const [workloads, setWorkloads] = useState<any[]>([])
+                const [evaluations, setEvaluations] = useState<any[]>([])
+                const [newEvaluation, setNewEvaluation] = useState({ name: '', vendor: '', affected_services: '', poc_score: 50, adoption_probability: 50, decision_date: '', workload_id: '' })
+                const [selectedRec, setSelectedRec] = useState<any | null>(null)
+                const [selectedDetails, setSelectedDetails] = useState<any | null>(null)
+                const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+                const [isDetailsLoading, setIsDetailsLoading] = useState(false)
+                const [isReevaluating, setIsReevaluating] = useState(false)
+                const [workloadContext, setWorkloadContext] = useState('')
+                // These will be used when integrating the tabbed drawer component
+                // const [activeDrawerTab, setActiveDrawerTab] = useState('intelligence')
+                // const [newContextNote, setNewContextNote] = useState('')
+                // const [contextHistory, setContextHistory] = useState<any[]>([])
+                const [showReEvalPrompt, setShowReEvalPrompt] = useState(false)
+                const [reEvalTriggers, setReEvalTriggers] = useState({
+                  new_document: false,
+                  status_change: false,
+                  new_context: false,
+                  decision_date_passed: false,
+                  fresh_analysis: false
+                })
 
               const fetchData = useCallback(async () => {
             try {
@@ -87,6 +109,32 @@ function App() {
                               setSchedulerStatus(schedData)
                             } catch {
                               setSchedulerStatus(null)
+                            }
+
+                            // Fetch Phase 3 data (smart recommendations and intelligence status)
+                            try {
+                              const smartRes = await fetch(`${API_URL}/api/recommendations/smart`)
+                              const smartData = await smartRes.json()
+                              setSmartRecommendations(smartData)
+                            } catch {
+                              setSmartRecommendations(null)
+                            }
+
+                            // Fetch workloads and evaluations
+                            try {
+                              const wlRes = await fetch(`${API_URL}/api/workloads`)
+                              const wlData = await wlRes.json()
+                              setWorkloads(wlData.workloads || [])
+                            } catch {
+                              setWorkloads([])
+                            }
+
+                            try {
+                              const evalRes = await fetch(`${API_URL}/api/evaluations`)
+                              const evalData = await evalRes.json()
+                              setEvaluations(evalData.evaluations || [])
+                            } catch {
+                              setEvaluations([])
                             }
         
               const endpoints = ['stats', 'agents', 'hidden-costs', 'budgets', 'recommendations', 'controls', 'alert-config', 'mission-critical', 'alerts', 'anomaly-data', 'variance-data', 'forecast', 'azure-config', 'control-settings', 'circuit-breakers']
@@ -436,6 +484,197 @@ function App() {
   const fmt = (v?: number | null) => {
     const n = typeof v === 'number' && !Number.isNaN(v) ? v : 0
     return n >= 1000000 ? `$${(n/1000000).toFixed(1)}M` : n >= 1000 ? `$${(n/1000).toFixed(0)}K` : `$${n.toFixed(0)}`
+  }
+
+  const createEvaluation = async () => {
+    if (!newEvaluation.name || !newEvaluation.vendor || !newEvaluation.workload_id) {
+      toast.error('Please enter evaluation name, vendor, and select a workload')
+      return
+    }
+    try {
+      const formData = new FormData()
+      formData.append('workload_id', newEvaluation.workload_id)
+      formData.append('name', newEvaluation.name)
+      formData.append('vendor', newEvaluation.vendor)
+      formData.append('evaluation_type', 'saas_replacement')
+      formData.append('status', 'evaluating')
+      if (newEvaluation.decision_date) formData.append('decision_date', newEvaluation.decision_date)
+      formData.append('adoption_probability_pct', String(newEvaluation.adoption_probability))
+      if (newEvaluation.poc_score) formData.append('poc_success_score', String(newEvaluation.poc_score))
+      formData.append('hold_commitments', 'true')
+      if (newEvaluation.affected_services) {
+        formData.append('affected_azure_services', JSON.stringify(newEvaluation.affected_services.split(',').map(s => s.trim()).filter(Boolean)))
+      }
+      
+      const res = await fetch(`${API_URL}/api/evaluations`, {
+        method: 'POST',
+        body: formData
+      })
+      const data = await res.json()
+      if (data.id) {
+        toast.success(`Evaluation "${newEvaluation.name}" created`)
+        setNewEvaluation({ name: '', vendor: '', affected_services: '', poc_score: 50, adoption_probability: 50, decision_date: '', workload_id: '' })
+        fetchData()
+      }
+    } catch (e) {
+      toast.error('Failed to create evaluation')
+    }
+  }
+
+  const deleteEvaluation = async (id: string) => {
+    try {
+      await fetch(`${API_URL}/api/evaluations/${id}`, { method: 'DELETE' })
+      toast.success('Evaluation deleted')
+      fetchData()
+    } catch (e) {
+      toast.error('Failed to delete evaluation')
+    }
+  }
+
+  const openRecommendationDrawer = async (rec: any) => {
+    setSelectedRec(rec)
+    setIsDrawerOpen(true)
+    setIsDetailsLoading(true)
+    setWorkloadContext('')
+    try {
+      const res = await fetch(`${API_URL}/api/recommendations/${rec.id || rec.resource_id || 'demo'}/details`)
+      const details = await res.json()
+      setSelectedDetails(details)
+      if (details.workload?.id) {
+        const ctxRes = await fetch(`${API_URL}/api/workloads/${details.workload.id}/context`)
+        const ctxData = await ctxRes.json()
+        if (ctxData.context?.length > 0) {
+          setWorkloadContext(ctxData.context[0].content)
+        }
+      }
+    } catch (e) {
+      console.error(e)
+      setSelectedDetails(null)
+    } finally {
+      setIsDetailsLoading(false)
+    }
+  }
+
+  const openReEvalPrompt = () => {
+    if (!selectedRec || !selectedDetails?.evaluation?.id) {
+      toast.error('No evaluation linked to this recommendation')
+      return
+    }
+    setReEvalTriggers({
+      new_document: false,
+      status_change: false,
+      new_context: false,
+      decision_date_passed: false,
+      fresh_analysis: false
+    })
+    setShowReEvalPrompt(true)
+  }
+
+  const handleReevaluate = async () => {
+    if (!selectedRec || !selectedDetails?.evaluation?.id) {
+      toast.error('No evaluation linked to this recommendation')
+      return
+    }
+    setShowReEvalPrompt(false)
+    setIsReevaluating(true)
+    
+    // Determine trigger based on checkboxes
+    let trigger = 'manual'
+    const focusAreas: string[] = []
+    
+    if (reEvalTriggers.new_document) {
+      trigger = 'new_document'
+      focusAreas.push('security_review', 'poc_metrics')
+    }
+    if (reEvalTriggers.status_change) {
+      trigger = 'status_change'
+      focusAreas.push('timeline', 'executive_support')
+    }
+    if (reEvalTriggers.new_context) {
+      trigger = 'new_context'
+      focusAreas.push('executive_support', 'budget')
+    }
+    if (reEvalTriggers.decision_date_passed) {
+      trigger = 'decision_date_passed'
+      focusAreas.push('timeline')
+    }
+    if (reEvalTriggers.fresh_analysis) {
+      trigger = 'manual'
+    }
+    
+    try {
+      // Get previous analysis ID if exists
+      const previousAnalysisId = selectedDetails?.agent_analysis?.id || null
+      
+      await fetch(`${API_URL}/api/evaluations/${selectedDetails.evaluation.id}/analyze`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trigger,
+          focus_areas: focusAreas.length > 0 ? focusAreas : null,
+          previous_analysis_id: previousAnalysisId
+        })
+      })
+      const res = await fetch(`${API_URL}/api/recommendations/${selectedRec.id || selectedRec.resource_id || 'demo'}/details`)
+      const details = await res.json()
+      setSelectedDetails(details)
+      toast.success('Recommendation re-evaluated with AI agents')
+      fetchData()
+    } catch (e) {
+      console.error(e)
+      toast.error('Failed to re-evaluate')
+    } finally {
+      setIsReevaluating(false)
+    }
+  }
+
+  const saveWorkloadContext = async () => {
+    if (!selectedDetails?.workload?.id || !workloadContext.trim()) {
+      toast.error('Please enter context and ensure workload is linked')
+      return
+    }
+    try {
+      const formData = new FormData()
+      formData.append('content', workloadContext)
+      formData.append('added_by', 'user')
+      await fetch(`${API_URL}/api/workloads/${selectedDetails.workload.id}/context`, {
+        method: 'POST',
+        body: formData
+      })
+      toast.success('Application context saved')
+    } catch (e) {
+      toast.error('Failed to save context')
+    }
+  }
+
+  const setOverride = async (action: string, reason: string) => {
+    if (!selectedRec) return
+    try {
+      const formData = new FormData()
+      formData.append('action', action)
+      formData.append('reason', reason)
+      formData.append('override_by', 'user')
+      await fetch(`${API_URL}/api/recommendations/${selectedRec.id || selectedRec.resource_id || 'demo'}/override`, {
+        method: 'POST',
+        body: formData
+      })
+      toast.success(`Override set: ${action.toUpperCase()}`)
+      fetchData()
+      setIsDrawerOpen(false)
+    } catch (e) {
+      toast.error('Failed to set override')
+    }
+  }
+
+  const getAllSmartRecs = () => {
+    if (!smartRecommendations) return []
+    const all = [
+      ...(smartRecommendations.approved || []).map((r: any) => ({ ...r, _action: 'approve' })),
+      ...(smartRecommendations.modified || []).map((r: any) => ({ ...r, _action: 'modify' })),
+      ...(smartRecommendations.hold || []).map((r: any) => ({ ...r, _action: 'hold' })),
+      ...(smartRecommendations.blocked || []).map((r: any) => ({ ...r, _action: 'block' }))
+    ]
+    return all
   }
 
   return (
@@ -926,41 +1165,150 @@ function App() {
 
         {activeTab === 'risp' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-4 gap-4">
-              {[{ l: 'CURRENT RI COVERAGE', v: `${stats?.ri_coverage || 35}%`, c: 'green' }, { l: 'CURRENT SP COVERAGE', v: `${stats?.sp_coverage || 25}%`, c: 'purple' }, { l: 'TARGET COVERAGE', v: `${stats?.target_coverage || 60}%`, c: 'white' }, { l: 'POTENTIAL SAVINGS', v: '$89K', c: 'green' }].map((s, i) => (
+            <div className="grid grid-cols-5 gap-4">
+              {[
+                { l: 'CURRENT RI COVERAGE', v: `${stats?.ri_coverage || 35}%`, c: 'green' },
+                { l: 'CURRENT SP COVERAGE', v: `${stats?.sp_coverage || 25}%`, c: 'purple' },
+                { l: 'TARGET COVERAGE', v: `${stats?.target_coverage || 60}%`, c: 'white' },
+                { l: 'POTENTIAL SAVINGS', v: '$89K', c: 'green' },
+                { l: 'ACTIVE EVALUATIONS', v: `${evaluations.length}`, c: 'yellow' }
+              ].map((s, i) => (
                 <div key={i} className="bg-slate-900 rounded-xl border border-slate-800 p-5">
                   <p className="text-xs text-slate-400 mb-1">{s.l}</p>
-                  <p className={`text-3xl font-bold ${s.c === 'green' ? 'text-green-400' : s.c === 'purple' ? 'text-purple-400' : 'text-white'}`}>{s.v}</p>
+                  <p className={`text-3xl font-bold ${s.c === 'green' ? 'text-green-400' : s.c === 'purple' ? 'text-purple-400' : s.c === 'yellow' ? 'text-yellow-400' : 'text-white'}`}>{s.v}</p>
                 </div>
               ))}
             </div>
+
+            {/* SaaS Evaluations Section */}
+            <div className="bg-slate-900 rounded-xl border border-amber-500/30 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-400" />
+                  <h3 className="font-semibold text-white">Upcoming SaaS / Technology Evaluations</h3>
+                  <span className="px-2 py-1 bg-amber-500/20 text-amber-400 text-xs rounded">Affects RI/SP Decisions</span>
+                </div>
+              </div>
+              <p className="text-sm text-slate-400 mb-4">Track technology evaluations that may replace Azure workloads. Agents will automatically HOLD commitments for affected resources until decisions are made.</p>
+              
+              {evaluations.length > 0 ? (
+                <table className="w-full mb-4">
+                  <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-800"><th className="pb-3">Evaluation</th><th className="pb-3">Vendor</th><th className="pb-3">Workload</th><th className="pb-3">Status</th><th className="pb-3">Decision Date</th><th className="pb-3">Adoption Risk</th><th className="pb-3">Holding</th><th className="pb-3">Actions</th></tr></thead>
+                  <tbody>
+                    {evaluations.map((e: any) => (
+                      <tr key={e.id} className="border-b border-slate-800/50 text-sm">
+                        <td className="py-3 font-medium text-white">{e.name}</td>
+                        <td className="py-3 text-slate-400">{e.vendor}</td>
+                        <td className="py-3 text-slate-400">{workloads.find((w: any) => w.id === e.workload_id)?.name || 'Unknown'}</td>
+                        <td className="py-3"><span className={`px-2 py-1 rounded text-xs ${e.status === 'poc' ? 'bg-blue-500/20 text-blue-400' : e.status === 'pilot' ? 'bg-purple-500/20 text-purple-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{e.status?.toUpperCase()}</span></td>
+                        <td className="py-3 text-slate-400">{e.decision_date || 'TBD'}</td>
+                        <td className="py-3"><span className={`px-2 py-1 rounded text-xs ${e.adoption_probability_pct >= 70 ? 'bg-red-500/20 text-red-400' : e.adoption_probability_pct >= 40 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-green-500/20 text-green-400'}`}>{e.adoption_probability_pct}%</span></td>
+                        <td className="py-3">{e.hold_commitments ? <span className="px-2 py-1 bg-amber-500/20 text-amber-400 text-xs rounded">HOLDING</span> : <span className="text-slate-500 text-xs">No</span>}</td>
+                        <td className="py-3"><button onClick={() => deleteEvaluation(e.id)} className="text-red-400 hover:text-red-300 text-xs">Delete</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="text-center py-6 text-slate-500 mb-4">No active evaluations. Add one below to track SaaS decisions that affect RI/SP commitments.</div>
+              )}
+
+              {/* Add Evaluation Form */}
+              <div className="bg-slate-800/50 rounded-lg p-4">
+                <h4 className="text-sm font-medium text-white mb-3">Add New Evaluation</h4>
+                <div className="grid grid-cols-6 gap-3">
+                  <input type="text" placeholder="Evaluation name (e.g., Snowflake POC)" value={newEvaluation.name} onChange={e => setNewEvaluation(prev => ({ ...prev, name: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
+                  <input type="text" placeholder="Vendor" value={newEvaluation.vendor} onChange={e => setNewEvaluation(prev => ({ ...prev, vendor: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
+                  <select value={newEvaluation.workload_id} onChange={e => setNewEvaluation(prev => ({ ...prev, workload_id: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white">
+                    <option value="">Select Workload</option>
+                    {workloads.map((w: any) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                  </select>
+                  <input type="date" placeholder="Decision Date" value={newEvaluation.decision_date} onChange={e => setNewEvaluation(prev => ({ ...prev, decision_date: e.target.value }))} className="bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-white" />
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400">Adoption:</span>
+                    <input type="range" min="0" max="100" value={newEvaluation.adoption_probability} onChange={e => setNewEvaluation(prev => ({ ...prev, adoption_probability: parseInt(e.target.value) }))} className="flex-1" />
+                    <span className="text-xs text-white w-8">{newEvaluation.adoption_probability}%</span>
+                  </div>
+                  <button onClick={createEvaluation} className="bg-amber-500 hover:bg-amber-600 text-black font-medium rounded px-4 py-2 text-sm">Add Evaluation</button>
+                </div>
+              </div>
+            </div>
+
+            {/* AI-Powered Recommendations with Workload Intelligence */}
             <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
               <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-3"><Sparkles className="w-5 h-5 text-purple-400" /><h3 className="font-semibold text-white">AI-Powered Commitment Recommendations</h3></div>
-                                <div className="flex items-center gap-2">
-                                  <span className={`px-2 py-1 rounded text-xs ${dataSource === 'azure' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{dataSource === 'azure' ? 'LIVE DATA' : 'DEMO DATA'}</span>
-                                  <span className="px-3 py-1 bg-purple-500/20 text-purple-400 text-xs font-medium rounded-full">Commitment Advisor Agent</span>
-                                </div>
+                <div className="flex items-center gap-3"><Sparkles className="w-5 h-5 text-purple-400" /><h3 className="font-semibold text-white">AI-Powered Commitment Recommendations</h3></div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-1 rounded text-xs ${dataSource === 'azure' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>{dataSource === 'azure' ? 'LIVE DATA' : 'DEMO DATA'}</span>
+                  <span className="px-3 py-1 bg-purple-500/20 text-purple-400 text-xs font-medium rounded-full">Multi-Agent Ensemble (GPT-5, O3, O4-Mini, GPT-4.1)</span>
+                </div>
               </div>
+              <p className="text-sm text-slate-400 mb-4">Click any row to open the deep-dive drawer with AI analysis, workload context, and override options.</p>
               <table className="w-full">
-                <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-800"><th className="pb-3">Resource</th><th className="pb-3">Type</th><th className="pb-3">MSRP</th><th className="pb-3">EA Price (12% off)</th><th className="pb-3">RI Price</th><th className="pb-3">SP Price</th><th className="pb-3">Stability</th><th className="pb-3">Recommendation</th><th className="pb-3">Confidence</th></tr></thead>
+                <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-800"><th className="pb-3">Resource</th><th className="pb-3">Workload</th><th className="pb-3">Type</th><th className="pb-3">Monthly Cost</th><th className="pb-3">Risk</th><th className="pb-3">Action</th><th className="pb-3">Reason</th><th className="pb-3">Re-evaluate By</th></tr></thead>
                 <tbody>
-                  {recommendations.map((r: any, i: number) => (
-                    <tr key={i} className="border-b border-slate-800/50 text-sm">
-                      <td className="py-4 font-medium text-white">{r.resource}</td>
-                      <td className="py-4 text-slate-400">{r.type}</td>
-                      <td className="py-4 text-slate-500">${(r.msrp || r.monthly_cost)?.toLocaleString()}</td>
-                      <td className="py-4 text-white">${(r.ea_price || r.monthly_cost)?.toLocaleString()}</td>
-                      <td className="py-4"><span className="text-green-400">${(r.ri_price || 0)?.toLocaleString()}</span><span className="text-xs text-green-500 ml-1">({r.ri_discount || '36%'} off)</span></td>
-                      <td className="py-4"><span className="text-purple-400">${(r.sp_price || 0)?.toLocaleString()}</span><span className="text-xs text-purple-500 ml-1">({r.sp_discount || '33%'} off)</span></td>
-                      <td className="py-4"><div className="flex items-center gap-2"><div className="w-12 h-2 bg-slate-800 rounded-full overflow-hidden"><div className={`h-full rounded-full ${r.stability >= 90 ? 'bg-green-500' : r.stability >= 75 ? 'bg-yellow-500' : 'bg-orange-500'}`} style={{ width: `${r.stability}%` }} /></div><span className="text-slate-400 text-xs">{r.stability}%</span></div></td>
-                      <td className="py-4"><span className={`px-2 py-1 rounded text-xs font-medium ${r.recommendation.includes('3-Year') ? 'bg-green-500/20 text-green-400' : r.recommendation.includes('SP') ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'}`}>{r.recommendation}</span></td>
-                      <td className="py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${r.confidence >= 90 ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'}`}>{r.confidence}%</span></td>
+                  {(getAllSmartRecs().length > 0 ? getAllSmartRecs() : recommendations).map((r: any, i: number) => (
+                    <tr key={i} onClick={() => openRecommendationDrawer(r)} className="border-b border-slate-800/50 text-sm hover:bg-slate-800/40 cursor-pointer">
+                      <td className="py-4 font-medium text-white">{r.resource || r.sku || r.resource_id?.split('/').pop() || 'Resource'}</td>
+                      <td className="py-4">{r.workload?.name ? <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">{r.workload.name}</span> : <span className="text-slate-500 text-xs">Unassigned</span>}</td>
+                      <td className="py-4 text-slate-400">{r.type || r.recommendation_type || 'RI'}</td>
+                      <td className="py-4 text-white">${(r.monthly_cost || r.net_savings || 0).toLocaleString()}</td>
+                      <td className="py-4">
+                        {r.intelligence?.risk_score !== undefined || r.agent_analysis?.risk_score !== undefined ? (
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${(r.intelligence?.risk_score || r.agent_analysis?.risk_score || 0) <= 3 ? 'bg-green-500/20 text-green-400' : (r.intelligence?.risk_score || r.agent_analysis?.risk_score || 0) <= 6 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-red-500/20 text-red-400'}`}>
+                            {(r.intelligence?.risk_score || r.agent_analysis?.risk_score || 0).toFixed(1)}/10
+                          </span>
+                        ) : <span className="text-slate-500 text-xs">-</span>}
+                      </td>
+                      <td className="py-4">
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${
+                          (r._action || r.intelligence?.action) === 'approve' ? 'bg-green-500/20 text-green-400' :
+                          (r._action || r.intelligence?.action) === 'modify' ? 'bg-blue-500/20 text-blue-400' :
+                          (r._action || r.intelligence?.action) === 'hold' ? 'bg-yellow-500/20 text-yellow-400' :
+                          (r._action || r.intelligence?.action) === 'block' ? 'bg-red-500/20 text-red-400' :
+                          'bg-green-500/20 text-green-400'
+                        }`}>
+                          {(r._action || r.intelligence?.action || r.recommendation || 'APPROVE').toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="py-4 text-slate-400 text-xs max-w-xs truncate">{r.intelligence?.reason || r.intelligence?.evaluation_name || '-'}</td>
+                      <td className="py-4">{r.evaluation?.decision_date || r.intelligence?.decision_date ? <span className="px-2 py-1 bg-amber-500/20 text-amber-400 text-xs rounded">{r.evaluation?.decision_date || r.intelligence?.decision_date}</span> : <span className="text-slate-500 text-xs">-</span>}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            {/* Workload Registry */}
+            <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <Database className="w-5 h-5 text-blue-400" />
+                <h3 className="font-semibold text-white">Workload Registry</h3>
+                <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded">{workloads.length} Workloads</span>
+              </div>
+              <p className="text-sm text-slate-400 mb-4">Business applications mapped to Azure resources. Add context like "PACS - Picture Archiving System" to help AI agents make better commitment decisions.</p>
+              {workloads.length > 0 ? (
+                <div className="grid grid-cols-3 gap-4">
+                  {workloads.map((w: any) => (
+                    <div key={w.id} className="bg-slate-800/50 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="font-medium text-white">{w.name}</h4>
+                        <span className={`px-2 py-1 rounded text-xs ${w.status === 'active' ? 'bg-green-500/20 text-green-400' : w.status === 'evaluating' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-slate-500/20 text-slate-400'}`}>{w.status?.toUpperCase()}</span>
+                      </div>
+                      <p className="text-sm text-slate-400 mb-2">{w.description || 'No description'}</p>
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <span>Owner: {w.owner_name || 'Unassigned'}</span>
+                        <span>Criticality: {w.criticality || 'standard'}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-6 text-slate-500">No workloads registered. Workloads are created when you import Azure data or add them via the API.</div>
+              )}
+            </div>
+
+            {/* RI vs SP Guidance */}
             <div className="grid grid-cols-2 gap-6">
               <div className="bg-green-900/20 border border-green-500/30 rounded-xl p-6">
                 <div className="flex items-center gap-2 mb-4"><Lock className="w-5 h-5 text-green-400" /><h4 className="font-semibold text-green-400">Choose Reserved Instances When:</h4></div>
@@ -1454,6 +1802,206 @@ FinOps AI Command Center`}
               </button>
               <button onClick={() => handleAlertAction('dismiss')} className="py-2 px-4 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 text-sm font-medium">
                 Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deep-Dive Drawer for Recommendation Details */}
+      {isDrawerOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="flex-1 bg-black/40" onClick={() => setIsDrawerOpen(false)} />
+          <div className="w-full max-w-xl h-full bg-slate-950 border-l border-slate-800 p-6 overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-white">Recommendation Details</h2>
+              <button onClick={() => setIsDrawerOpen(false)} className="text-slate-400 hover:text-white"><X className="w-6 h-6" /></button>
+            </div>
+
+            {isDetailsLoading ? (
+              <div className="flex items-center justify-center py-12"><div className="animate-spin w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full" /></div>
+            ) : (
+              <div className="space-y-6">
+                {/* Resource Summary */}
+                <div className="bg-slate-900 rounded-lg p-4 border border-slate-800">
+                  <h3 className="text-sm font-medium text-slate-400 mb-2">Resource</h3>
+                  <p className="text-lg font-semibold text-white">{selectedRec?.resource || selectedRec?.sku || selectedRec?.resource_id?.split('/').pop() || 'Resource'}</p>
+                  <p className="text-sm text-slate-400">{selectedRec?.type || selectedRec?.recommendation_type || 'RI'} - ${(selectedRec?.monthly_cost || selectedRec?.net_savings || 0).toLocaleString()}/mo</p>
+                </div>
+
+                {/* Workload Context */}
+                <div className="bg-slate-900 rounded-lg p-4 border border-slate-800">
+                  <h3 className="text-sm font-medium text-slate-400 mb-2">Workload / Application</h3>
+                  {selectedRec?.workload?.name || selectedDetails?.workload?.name ? (
+                    <div>
+                      <p className="text-lg font-semibold text-white">{selectedRec?.workload?.name || selectedDetails?.workload?.name}</p>
+                      <p className="text-sm text-slate-400 mb-3">{selectedDetails?.workload?.status?.toUpperCase()} - {selectedDetails?.workload?.criticality || 'standard'} criticality</p>
+                    </div>
+                  ) : (
+                    <p className="text-slate-500 mb-3">No workload assigned</p>
+                  )}
+                  <label className="text-xs text-slate-400">Application Context (e.g., "PACS - Picture Archiving System for radiology")</label>
+                  <textarea 
+                    value={workloadContext} 
+                    onChange={e => setWorkloadContext(e.target.value)}
+                    placeholder="Add context to help AI agents make better decisions..."
+                    className="w-full mt-1 bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm text-white min-h-[80px]"
+                  />
+                  <button onClick={saveWorkloadContext} className="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm text-white">Save Context</button>
+                </div>
+
+                {/* AI Analysis */}
+                <div className="bg-slate-900 rounded-lg p-4 border border-slate-800">
+                  <h3 className="text-sm font-medium text-slate-400 mb-3">AI Agent Analysis</h3>
+                  <div className="grid grid-cols-3 gap-4 mb-4">
+                    <div className="text-center">
+                      <p className="text-xs text-slate-400">Risk Score</p>
+                      <p className={`text-2xl font-bold ${(selectedRec?.intelligence?.risk_score || selectedDetails?.agent_analysis?.risk_score || 0) <= 3 ? 'text-green-400' : (selectedRec?.intelligence?.risk_score || selectedDetails?.agent_analysis?.risk_score || 0) <= 6 ? 'text-yellow-400' : 'text-red-400'}`}>
+                        {(selectedRec?.intelligence?.risk_score || selectedDetails?.agent_analysis?.risk_score || 0).toFixed(1)}/10
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-slate-400">Confidence</p>
+                      <p className="text-2xl font-bold text-purple-400">{selectedRec?.intelligence?.confidence || selectedDetails?.agent_analysis?.confidence || 85}%</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-slate-400">Action</p>
+                      <span className={`inline-block px-3 py-1 rounded text-sm font-medium ${
+                        (selectedRec?._action || selectedRec?.intelligence?.action) === 'approve' ? 'bg-green-500/20 text-green-400' :
+                        (selectedRec?._action || selectedRec?.intelligence?.action) === 'modify' ? 'bg-blue-500/20 text-blue-400' :
+                        (selectedRec?._action || selectedRec?.intelligence?.action) === 'hold' ? 'bg-yellow-500/20 text-yellow-400' :
+                        (selectedRec?._action || selectedRec?.intelligence?.action) === 'block' ? 'bg-red-500/20 text-red-400' :
+                        'bg-green-500/20 text-green-400'
+                      }`}>
+                        {(selectedRec?._action || selectedRec?.intelligence?.action || 'APPROVE').toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="bg-slate-800/50 rounded p-3">
+                    <p className="text-sm text-slate-300">{selectedRec?.intelligence?.reason || selectedDetails?.agent_analysis?.summary || 'No blocking factors identified. Safe to commit.'}</p>
+                  </div>
+                </div>
+
+                {/* Blocking Evaluation */}
+                {(selectedRec?.evaluation || selectedDetails?.evaluation) && (
+                  <div className="bg-amber-900/20 rounded-lg p-4 border border-amber-500/30">
+                    <h3 className="text-sm font-medium text-amber-400 mb-2">Blocking SaaS Evaluation</h3>
+                    <p className="text-lg font-semibold text-white">{selectedRec?.evaluation?.name || selectedDetails?.evaluation?.name}</p>
+                    <p className="text-sm text-slate-400 mb-2">Status: {selectedRec?.evaluation?.status || selectedDetails?.evaluation?.status}</p>
+                    <div className="flex items-center gap-4 text-sm">
+                      <span className="text-amber-400">Decision Date: {selectedRec?.evaluation?.decision_date || selectedDetails?.evaluation?.decision_date || 'TBD'}</span>
+                      <span className="text-amber-400">Adoption Risk: {selectedRec?.evaluation?.adoption_probability || selectedDetails?.evaluation?.adoption_probability || 50}%</span>
+                    </div>
+                    <button 
+                      onClick={openReEvalPrompt} 
+                      disabled={isReevaluating}
+                      className="mt-3 px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 rounded text-sm text-white flex items-center gap-2"
+                    >
+                      {isReevaluating ? <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> : <RefreshCw className="w-4 h-4" />}
+                      Re-evaluate with AI Agents
+                    </button>
+                  </div>
+                )}
+
+                {/* Manual Override */}
+                <div className="bg-slate-900 rounded-lg p-4 border border-slate-800">
+                  <h3 className="text-sm font-medium text-slate-400 mb-3">Manual Override</h3>
+                  <p className="text-xs text-slate-500 mb-3">Override the AI recommendation with your own decision. This takes priority over agent analysis.</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    <button onClick={() => setOverride('approve', 'Manual approval by user')} className="py-2 px-3 bg-green-600 hover:bg-green-700 rounded text-sm text-white">APPROVE</button>
+                    <button onClick={() => setOverride('modify', 'Reduce term length')} className="py-2 px-3 bg-blue-600 hover:bg-blue-700 rounded text-sm text-white">MODIFY</button>
+                    <button onClick={() => setOverride('hold', 'Wait for evaluation')} className="py-2 px-3 bg-yellow-600 hover:bg-yellow-700 rounded text-sm text-white">HOLD</button>
+                    <button onClick={() => setOverride('block', 'Do not commit')} className="py-2 px-3 bg-red-600 hover:bg-red-700 rounded text-sm text-white">BLOCK</button>
+                  </div>
+                </div>
+
+                {/* Models Used */}
+                <div className="bg-slate-900 rounded-lg p-4 border border-slate-800">
+                  <h3 className="text-sm font-medium text-slate-400 mb-2">AI Models Consulted</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {['GPT-5', 'O3', 'O4-Mini', 'GPT-4.1'].map(model => (
+                      <span key={model} className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs rounded">{model}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Re-evaluation Prompt Dialog */}
+      {showReEvalPrompt && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg p-6 w-[400px] border border-slate-700">
+            <h3 className="text-lg font-semibold text-white mb-2">What changed?</h3>
+            <p className="text-sm text-slate-400 mb-4">Help the AI focus on what's new (optional)</p>
+            
+            <div className="space-y-3 mb-6">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={reEvalTriggers.new_document}
+                  onChange={(e) => setReEvalTriggers({...reEvalTriggers, new_document: e.target.checked})}
+                  className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500"
+                />
+                <span className="text-sm text-slate-300">New document uploaded</span>
+              </label>
+              
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={reEvalTriggers.status_change}
+                  onChange={(e) => setReEvalTriggers({...reEvalTriggers, status_change: e.target.checked})}
+                  className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500"
+                />
+                <span className="text-sm text-slate-300">Evaluation status updated</span>
+              </label>
+              
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={reEvalTriggers.new_context}
+                  onChange={(e) => setReEvalTriggers({...reEvalTriggers, new_context: e.target.checked})}
+                  className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500"
+                />
+                <span className="text-sm text-slate-300">New context/information added</span>
+              </label>
+              
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={reEvalTriggers.decision_date_passed}
+                  onChange={(e) => setReEvalTriggers({...reEvalTriggers, decision_date_passed: e.target.checked})}
+                  className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500"
+                />
+                <span className="text-sm text-slate-300">Decision date passed</span>
+              </label>
+              
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input 
+                  type="checkbox" 
+                  checked={reEvalTriggers.fresh_analysis}
+                  onChange={(e) => setReEvalTriggers({...reEvalTriggers, fresh_analysis: e.target.checked})}
+                  className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500"
+                />
+                <span className="text-sm text-slate-300">Just want a fresh analysis</span>
+              </label>
+            </div>
+            
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setShowReEvalPrompt(false)}
+                className="flex-1 py-2 px-4 bg-slate-700 hover:bg-slate-600 rounded text-sm text-white"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleReevaluate}
+                className="flex-1 py-2 px-4 bg-amber-600 hover:bg-amber-700 rounded text-sm text-white flex items-center justify-center gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Run Analysis
               </button>
             </div>
           </div>
