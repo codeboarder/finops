@@ -613,6 +613,79 @@ cost_service = None
 recommendation_service = None
 budget_service = None
 
+def seed_phase3_demo_data():
+    """Seed demo workloads and evaluations for Phase 3.
+    
+    Uses is_demo flag to separate demo data from user-created data.
+    Demo data persists across restarts and is only seeded once.
+    """
+    if not PHASE3_AVAILABLE:
+        return
+    
+    from datetime import date, timedelta
+    
+    with get_db() as db:
+        # Check if demo data already exists (not just any workloads)
+        existing_demo = db.query(Workload).filter(Workload.is_demo == True).count()
+        if existing_demo > 0:
+            print(f"Phase 3 already has {existing_demo} demo workloads, skipping seed")
+            return
+        
+        # Create demo workloads
+        workloads_data = [
+            {"name": "PACS Imaging", "description": "Picture Archiving and Communication System for radiology imaging storage and retrieval", "owner_name": "Dr. Sarah Chen", "owner_email": "sarah.chen@adventhealth.org", "status": "active", "criticality": "mission_critical"},
+            {"name": "SQL Always On", "description": "High-availability SQL Server cluster for clinical data", "owner_name": "Mike Johnson", "owner_email": "mike.johnson@adventhealth.org", "status": "active", "criticality": "mission_critical"},
+            {"name": "Data Analytics Platform", "description": "Azure Synapse-based analytics for population health insights", "owner_name": "Lisa Park", "owner_email": "lisa.park@adventhealth.org", "status": "evaluating", "criticality": "high"},
+            {"name": "ASR Disaster Recovery", "description": "Azure Site Recovery for business continuity", "owner_name": "Tom Williams", "owner_email": "tom.williams@adventhealth.org", "status": "active", "criticality": "high"},
+            {"name": "ML Training Pipeline", "description": "GPU-based machine learning for diagnostic imaging AI", "owner_name": "Dr. James Lee", "owner_email": "james.lee@adventhealth.org", "status": "active", "criticality": "standard"},
+        ]
+        
+        created_workloads = []
+        for wl_data in workloads_data:
+            wl = Workload(
+                name=wl_data["name"],
+                description=wl_data["description"],
+                owner_name=wl_data["owner_name"],
+                owner_email=wl_data["owner_email"],
+                status=WorkloadStatus(wl_data["status"]),
+                criticality=wl_data["criticality"],
+                is_demo=True,  # Mark as demo data for persistence
+                demo_scenario="adventhealth"
+            )
+            db.add(wl)
+            db.flush()
+            created_workloads.append(wl)
+        
+        # Create demo evaluations
+        evaluations_data = [
+            {"name": "Snowflake Enterprise", "vendor": "Snowflake", "workload_idx": 2, "evaluation_type": "saas_replacement", "status": "poc", "decision_date": date.today() + timedelta(days=90), "adoption_probability_pct": 65, "poc_success_score": 78, "hold_commitments": True, "affected_azure_services": ["Azure Synapse", "Azure Data Lake"]},
+            {"name": "Databricks Unity Catalog", "vendor": "Databricks", "workload_idx": 2, "evaluation_type": "saas_replacement", "status": "evaluating", "decision_date": date.today() + timedelta(days=120), "adoption_probability_pct": 45, "hold_commitments": True, "affected_azure_services": ["Azure Synapse", "Azure ML"]},
+            {"name": "Google Cloud Healthcare API", "vendor": "Google Cloud", "workload_idx": 0, "evaluation_type": "saas_replacement", "status": "evaluating", "decision_date": date.today() + timedelta(days=180), "adoption_probability_pct": 25, "hold_commitments": False, "affected_azure_services": ["Azure Health Data Services"]},
+        ]
+        
+        for eval_data in evaluations_data:
+            ev = TechnologyEvaluation(
+                workload_id=created_workloads[eval_data["workload_idx"]].id,
+                name=eval_data["name"],
+                vendor=eval_data["vendor"],
+                evaluation_type=eval_data["evaluation_type"],
+                status=EvaluationStatus(eval_data["status"]),
+                started_date=date.today() - timedelta(days=30),
+                decision_date=eval_data["decision_date"],
+                adoption_probability_pct=eval_data["adoption_probability_pct"],
+                poc_success_score=eval_data.get("poc_success_score"),
+                hold_commitments=eval_data["hold_commitments"],
+                hold_expires=eval_data["decision_date"] + timedelta(days=14) if eval_data["hold_commitments"] else None,
+                affected_azure_services=eval_data["affected_azure_services"],
+                is_demo=True,  # Mark as demo data for persistence
+                demo_scenario="adventhealth"
+            )
+            db.add(ev)
+        
+        db.commit()
+        print(f"Phase 3 seeded: {len(workloads_data)} workloads, {len(evaluations_data)} evaluations")
+
+
 @app.on_event("startup")
 async def startup():
     global cost_service, recommendation_service, budget_service
@@ -625,6 +698,13 @@ async def startup():
             print("Phase 2 history database initialized")
         except Exception as e:
             print(f"Phase 2 database init failed: {e}")
+    
+    # Seed Phase 3 demo data
+    if PHASE3_AVAILABLE:
+        try:
+            seed_phase3_demo_data()
+        except Exception as e:
+            print(f"Phase 3 seed failed: {e}")
     
     # Initialize Azure services if available and configured
     if AZURE_SERVICES_AVAILABLE:
@@ -2716,14 +2796,40 @@ async def get_evaluation(evaluation_id: int):
 
 # ============ AI ANALYSIS ============
 
+class ReEvaluationRequest(BaseModel):
+    """Request body for re-evaluation with context about what changed."""
+    previous_analysis_id: Optional[int] = None
+    trigger: str = "manual"  # "new_document", "new_context", "status_change", "manual", "decision_date_passed"
+    focus_areas: Optional[List[str]] = None  # ["security_review", "timeline", "executive_support", "budget", "poc_metrics"]
+
+
 @app.post("/api/evaluations/{evaluation_id}/analyze")
-async def run_evaluation_analysis(evaluation_id: int):
-    """Run SaaS evaluator AI agent on an evaluation."""
+async def run_evaluation_analysis(
+    evaluation_id: int,
+    request: Optional[ReEvaluationRequest] = None
+):
+    """Run SaaS evaluator AI agent on an evaluation.
+    
+    For re-evaluations, include request body with:
+    - previous_analysis_id: ID of previous analysis to compare against
+    - trigger: What triggered this analysis (new_document, new_context, status_change, manual)
+    - focus_areas: Areas to focus on (security_review, timeline, executive_support, budget, poc_metrics)
+    """
     if not PHASE3_AVAILABLE:
         raise HTTPException(503, "Phase 3 not available")
     
     try:
-        result = intelligence_service.run_analysis(evaluation_id)
+        # Extract re-evaluation parameters if provided
+        trigger = request.trigger if request else "manual"
+        focus_areas = request.focus_areas if request else None
+        previous_analysis_id = request.previous_analysis_id if request else None
+        
+        result = intelligence_service.run_analysis(
+            evaluation_id,
+            trigger=trigger,
+            focus_areas=focus_areas,
+            previous_analysis_id=previous_analysis_id
+        )
         return result
     except ValueError as e:
         raise HTTPException(404, str(e))

@@ -80,6 +80,10 @@ class Workload(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_by = Column(String(255))
     
+    # Demo data flag - separates seed data from user-created data
+    is_demo = Column(Boolean, default=False, index=True)
+    demo_scenario = Column(String(100), nullable=True)  # e.g., "adventhealth", "contoso"
+    
     # Relationships
     evaluations = relationship("TechnologyEvaluation", back_populates="workload")
     context_notes = relationship("WorkloadContext", back_populates="workload")
@@ -176,6 +180,10 @@ class TechnologyEvaluation(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_by = Column(String(255))
+    
+    # Demo data flag - separates seed data from user-created data
+    is_demo = Column(Boolean, default=False, index=True)
+    demo_scenario = Column(String(100), nullable=True)
     
     # Relationships
     workload = relationship("Workload", back_populates="evaluations")

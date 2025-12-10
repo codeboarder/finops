@@ -273,9 +273,27 @@ class IntelligenceService:
             "source": "default"
         }
     
-    def run_analysis(self, evaluation_id: int) -> Dict[str, Any]:
-        """Run SaaS evaluator agent on an evaluation."""
-        return self.saas_agent.analyze(evaluation_id)
+    def run_analysis(
+        self, 
+        evaluation_id: int,
+        trigger: str = "manual",
+        focus_areas: Optional[List[str]] = None,
+        previous_analysis_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Run SaaS evaluator agent on an evaluation.
+        
+        Args:
+            evaluation_id: The evaluation to analyze
+            trigger: What triggered this analysis - "new_document", "new_context", "status_change", "manual"
+            focus_areas: Areas to focus on - ["security_review", "timeline", "executive_support", "budget", "poc_metrics"]
+            previous_analysis_id: ID of previous analysis to compare against
+        """
+        return self.saas_agent.analyze(
+            evaluation_id,
+            trigger=trigger,
+            focus_areas=focus_areas,
+            previous_analysis_id=previous_analysis_id
+        )
     
     def set_override(
         self,
