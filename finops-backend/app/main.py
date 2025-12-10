@@ -633,8 +633,9 @@ def seed_phase3_demo_data():
         
         # Create demo workloads
         workloads_data = [
+            {"name": "Patient Front Door", "description": "Patient scheduling, check-in, and call center application running on SQL Server and Windows VMs", "owner_name": "Jennifer Martinez", "owner_email": "jennifer.martinez@adventhealth.org", "status": "evaluating", "criticality": "mission_critical"},
             {"name": "PACS Imaging", "description": "Picture Archiving and Communication System for radiology imaging storage and retrieval", "owner_name": "Dr. Sarah Chen", "owner_email": "sarah.chen@adventhealth.org", "status": "active", "criticality": "mission_critical"},
-            {"name": "SQL Always On", "description": "High-availability SQL Server cluster for clinical data", "owner_name": "Mike Johnson", "owner_email": "mike.johnson@adventhealth.org", "status": "active", "criticality": "mission_critical"},
+            {"name": "Epic Integration", "description": "Epic EHR integration layer running on RHEL VMs", "owner_name": "Mike Johnson", "owner_email": "mike.johnson@adventhealth.org", "status": "active", "criticality": "mission_critical"},
             {"name": "Data Analytics Platform", "description": "Azure Synapse-based analytics for population health insights", "owner_name": "Lisa Park", "owner_email": "lisa.park@adventhealth.org", "status": "evaluating", "criticality": "high"},
             {"name": "ASR Disaster Recovery", "description": "Azure Site Recovery for business continuity", "owner_name": "Tom Williams", "owner_email": "tom.williams@adventhealth.org", "status": "active", "criticality": "high"},
             {"name": "ML Training Pipeline", "description": "GPU-based machine learning for diagnostic imaging AI", "owner_name": "Dr. James Lee", "owner_email": "james.lee@adventhealth.org", "status": "active", "criticality": "standard"},
@@ -658,9 +659,10 @@ def seed_phase3_demo_data():
         
         # Create demo evaluations
         evaluations_data = [
-            {"name": "Snowflake Enterprise", "vendor": "Snowflake", "workload_idx": 2, "evaluation_type": "saas_replacement", "status": "poc", "decision_date": date.today() + timedelta(days=90), "adoption_probability_pct": 65, "poc_success_score": 78, "hold_commitments": True, "affected_azure_services": ["Azure Synapse", "Azure Data Lake"]},
-            {"name": "Databricks Unity Catalog", "vendor": "Databricks", "workload_idx": 2, "evaluation_type": "saas_replacement", "status": "evaluating", "decision_date": date.today() + timedelta(days=120), "adoption_probability_pct": 45, "hold_commitments": True, "affected_azure_services": ["Azure Synapse", "Azure ML"]},
-            {"name": "Google Cloud Healthcare API", "vendor": "Google Cloud", "workload_idx": 0, "evaluation_type": "saas_replacement", "status": "evaluating", "decision_date": date.today() + timedelta(days=180), "adoption_probability_pct": 25, "hold_commitments": False, "affected_azure_services": ["Azure Health Data Services"]},
+            {"name": "PatientRUs App", "vendor": "PatientRUs Inc.", "workload_idx": 0, "evaluation_type": "saas_replacement", "status": "poc", "decision_date": date.today() + timedelta(days=60), "adoption_probability_pct": 70, "poc_success_score": 82, "hold_commitments": True, "affected_azure_services": ["SQL Server", "Windows VMs", "Azure Load Balancer"], "executive_sponsor": "Dr. Amanda Foster"},
+            {"name": "Snowflake Enterprise", "vendor": "Snowflake", "workload_idx": 3, "evaluation_type": "saas_replacement", "status": "poc", "decision_date": date.today() + timedelta(days=90), "adoption_probability_pct": 65, "poc_success_score": 78, "hold_commitments": True, "affected_azure_services": ["Azure Synapse", "Azure Data Lake"]},
+            {"name": "Databricks Unity Catalog", "vendor": "Databricks", "workload_idx": 3, "evaluation_type": "saas_replacement", "status": "evaluating", "decision_date": date.today() + timedelta(days=120), "adoption_probability_pct": 45, "hold_commitments": True, "affected_azure_services": ["Azure Synapse", "Azure ML"]},
+            {"name": "Google Cloud Healthcare API", "vendor": "Google Cloud", "workload_idx": 1, "evaluation_type": "saas_replacement", "status": "evaluating", "decision_date": date.today() + timedelta(days=180), "adoption_probability_pct": 25, "hold_commitments": False, "affected_azure_services": ["Azure Health Data Services"]},
         ]
         
         for eval_data in evaluations_data:
@@ -677,6 +679,7 @@ def seed_phase3_demo_data():
                 hold_commitments=eval_data["hold_commitments"],
                 hold_expires=eval_data["decision_date"] + timedelta(days=14) if eval_data["hold_commitments"] else None,
                 affected_azure_services=eval_data["affected_azure_services"],
+                executive_sponsor=eval_data.get("executive_sponsor"),
                 is_demo=True,  # Mark as demo data for persistence
                 demo_scenario="adventhealth"
             )
