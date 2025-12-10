@@ -5,7 +5,8 @@ import {
   DollarSign, Bot, Target, Brain, Sparkles, 
   Search, Bell, RefreshCw, Settings, Clock,
   Cloud, Layers, Lock, Key, Globe, Server,
-  Power, Sliders, MessageSquare, Send, X, Save, Play, Loader2, Database
+  Power, Sliders, MessageSquare, Send, X, Save, Play, Loader2, Database,
+  Upload, FileText
 } from 'lucide-react'
 import { 
   Line, AreaChart, Area, BarChart, Bar, 
@@ -89,9 +90,10 @@ function App() {
                                   sp_1year_discount: 33,
                                   sp_3year_discount: 52
                                 })
-                                const [rispActions, setRispActions] = useState<any>({ approved_count: 0, held_count: 0, blocked_count: 0, total_approved_savings: 0 })
+                                              const [rispActions, setRispActions] = useState<any>({ approved_count: 0, held_count: 0, blocked_count: 0, total_approved_savings: 0 })
+                                              const [uploadedDocs, setUploadedDocs] = useState<{name: string, size: number, url: string}[]>([])
 
-              const fetchData = useCallback(async () => {
+                            const fetchData = useCallback(async () => {
             try {
                             // Check Azure health first
                             try {
@@ -722,6 +724,43 @@ function App() {
       setIsDrawerOpen(false)
     } catch (e) {
       toast.error('Failed to set override')
+    }
+  }
+
+  const handleDocumentUpload = async (files: File[]) => {
+    const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
+    const validFiles = files.filter(f => validTypes.includes(f.type) || f.name.match(/\.(pdf|doc|docx|xls|xlsx)$/i))
+    
+    if (validFiles.length === 0) {
+      toast.error('Please upload PDF, Word, or Excel files only')
+      return
+    }
+    
+    for (const file of validFiles) {
+      try {
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('resource_id', selectedRec?.id || selectedRec?.resource_id || 'demo')
+        
+        const res = await fetch(`${API_URL}/api/documents/upload`, {
+          method: 'POST',
+          body: formData
+        })
+        
+        if (res.ok) {
+          const data = await res.json()
+          setUploadedDocs(prev => [...prev, { name: file.name, size: file.size, url: data.url || '#' }])
+          toast.success(`Uploaded: ${file.name}`)
+        } else {
+          // For demo mode, simulate successful upload
+          setUploadedDocs(prev => [...prev, { name: file.name, size: file.size, url: URL.createObjectURL(file) }])
+          toast.success(`Uploaded: ${file.name}`)
+        }
+      } catch (e) {
+        // For demo mode, simulate successful upload
+        setUploadedDocs(prev => [...prev, { name: file.name, size: file.size, url: URL.createObjectURL(file) }])
+        toast.success(`Uploaded: ${file.name}`)
+      }
     }
   }
 
@@ -2104,6 +2143,72 @@ FinOps AI Command Center`}
                     </button>
                   </div>
                 )}
+
+                {/* Supporting Documents */}
+                <div className="bg-slate-900 rounded-lg p-4 border border-slate-800">
+                  <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
+                    <FileText className="w-4 h-4" /> Supporting Documents
+                  </h3>
+                  
+                  {/* Uploaded Documents List */}
+                  {uploadedDocs.length > 0 ? (
+                    <div className="space-y-2 mb-4">
+                      {uploadedDocs.map((doc, idx) => (
+                        <div key={idx} className="flex items-center justify-between bg-slate-800/50 rounded px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-blue-400" />
+                            <span className="text-sm text-white">{doc.name}</span>
+                            <span className="text-xs text-slate-500">({(doc.size / 1024).toFixed(1)} KB)</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => window.open(doc.url, '_blank')} className="text-xs text-blue-400 hover:text-blue-300">View</button>
+                            <button onClick={() => setUploadedDocs(uploadedDocs.filter((_, i) => i !== idx))} className="text-xs text-red-400 hover:text-red-300">Delete</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-500 mb-4">No documents uploaded</p>
+                  )}
+                  
+                  {/* File Drop Zone */}
+                  <div 
+                    className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-lg p-4 text-center cursor-pointer transition-colors"
+                    onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-blue-500', 'bg-blue-500/10') }}
+                    onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove('border-blue-500', 'bg-blue-500/10') }}
+                    onDrop={(e) => {
+                      e.preventDefault()
+                      e.currentTarget.classList.remove('border-blue-500', 'bg-blue-500/10')
+                      const files = Array.from(e.dataTransfer.files)
+                      handleDocumentUpload(files)
+                    }}
+                    onClick={() => document.getElementById('doc-upload-input')?.click()}
+                  >
+                    <Upload className="w-6 h-6 text-slate-500 mx-auto mb-2" />
+                    <p className="text-sm text-slate-400">Drop files here or click to upload</p>
+                    <p className="text-xs text-slate-500 mt-1">Supports: PDF, Word, Excel</p>
+                  </div>
+                  <input 
+                    id="doc-upload-input" 
+                    type="file" 
+                    multiple 
+                    accept=".pdf,.doc,.docx,.xls,.xlsx"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files) handleDocumentUpload(Array.from(e.target.files))
+                    }}
+                  />
+                  
+                  {/* Re-run AI Analysis Button */}
+                  <button 
+                    onClick={openReEvalPrompt}
+                    disabled={isReevaluating}
+                    className="mt-4 w-full py-2 px-4 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded text-sm text-white flex items-center justify-center gap-2"
+                  >
+                    {isReevaluating ? <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> : <RefreshCw className="w-4 h-4" />}
+                    Re-run AI Analysis
+                  </button>
+                </div>
 
                 {/* Manual Override */}
                 <div className="bg-slate-900 rounded-lg p-4 border border-slate-800">

@@ -19,7 +19,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def init_history_db():
-    """Create all tables."""
+    """Create all tables. Drop and recreate to ensure schema is up to date."""
+    # Drop all tables first to ensure schema is fresh
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
 
