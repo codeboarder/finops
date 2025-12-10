@@ -1,167 +1,169 @@
 # FinOps AI Command Center
 
-A comprehensive Azure FinOps dashboard for cost optimization, anomaly detection, and intelligent resource management. Built for AdventHealth Azure Cost Intelligence.
+A comprehensive Azure FinOps dashboard for cost optimization, anomaly detection, and intelligent resource management.
 
-## Demo Video
+## Connect Your Azure Tenant
 
-Watch the 5-minute narrated demo showcasing cost spike detection, AI agent orchestration, and RI/SP optimization:
+The dashboard connects to your Azure subscription to pull real cost data, recommendations, and budget information. Without Azure credentials, the dashboard runs in demo mode with simulated data.
 
-[![FinOps Demo Video](video_assets/screenshots/01_executive_summary.png)](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)
+![Settings - Azure Connection](screenshots/settings_azure_connection.png)
 
-**[Download Demo Video (6.8 MB)](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)** | Voice narration generated with Azure OpenAI Realtime Mini
+### Prerequisites
 
-The demo covers:
-- Executive Summary with real AdventHealth cost data
-- Real-time anomaly detection (GPU cost spike at $847/hr)
-- AI Agent Fleet with 9 agents and cross-validation
-- RI/SP Optimizer with pricing breakdown (MSRP → EA → RI/SP)
-- Budget Guardrails with threshold alerts
-- Automation Controls and alert configuration
+Before connecting, you need an Azure App Registration with the following permissions:
+
+- **Cost Management Reader** - Read cost and usage data
+- **Reader** - Read resource information  
+- **Advisor Recommendations Reader** (optional) - Read Azure Advisor recommendations
+
+### Step 1: Create App Registration
+
+1. Go to Azure Portal > Azure Active Directory > App registrations
+2. Click "New registration"
+3. Name it "FinOps Dashboard" and register
+4. Note the **Application (client) ID** and **Directory (tenant) ID**
+5. Go to "Certificates & secrets" > "New client secret"
+6. Note the **Client Secret value** (copy immediately, it won't show again)
+
+### Step 2: Assign Permissions
+
+1. Go to your Subscription > Access control (IAM)
+2. Click "Add role assignment"
+3. Assign "Cost Management Reader" role to your App Registration
+4. Repeat for "Reader" role
+
+### Step 3: Connect in Dashboard
+
+1. Open the dashboard and go to **Settings** tab
+2. Enter your credentials:
+   - **Tenant ID**: Your Azure AD tenant ID
+   - **Client ID**: App registration client ID
+   - **Client Secret**: The secret you created
+   - **Subscription ID**: Your Azure subscription ID
+3. Click "Connect to Azure"
+
+Once connected, the dashboard badge changes from "DEMO DATA" to "LIVE DATA" and all cost information comes directly from Azure Cost Management APIs.
 
 ---
 
-![Executive Summary](screenshots/executive-summary.png)
+## What's Working Now
 
-## Overview
+These features are fully implemented and tested:
 
-The FinOps AI Command Center is a real-time cost management platform that combines AI-powered agents with Azure-native controls to provide complete visibility into cloud spending, detect anomalies, and optimize resource commitments.
+### Core Dashboard (Demo Mode)
 
-### Key Features
+![Executive Summary](screenshots/executive_summary.png)
 
-**Real-Time Cost Monitoring**
-- Live dashboard with $588K monthly Azure cost tracking
-- $19.6K daily rate monitoring based on actual AdventHealth MBR data
-- Real-time anomaly detection with ML-powered baseline comparisons
-- Automatic alerts for cost spikes exceeding thresholds
+The dashboard includes 9 tabs with full functionality in demo mode:
 
-**AI Agent Fleet**
-- 9 specialized AI agents working in orchestration
-- Primary agents: Cost Sentinel, Commitment Advisor, Orphan Hunter, Right-Size Engine, Spend Prophet, Storage Optimizer, GPT-5
-- Validator agents: Cost Validator, Recommendation Validator
-- Cross-validation ensures 97%+ accuracy on recommendations
+- **Executive Summary** - Cost metrics, anomaly timeline, budget guardrails, AI agent performance, conversational AI chat
+- **Command Center** - Real-time anomaly detection, variance analysis, 6-month forecast
+- **AI Agents** - 9 specialized agents with accuracy scores and actions taken
+- **Hidden Cost Hunter** - Identifies orphaned resources, idle VMs, unattached disks
+- **Budget Guardrails** - Configurable thresholds (60% info, 80% warning, 90% critical)
+- **RI/SP Optimizer** - Commitment recommendations with pricing breakdown
+- **Controls & Alerts** - Alert configuration and notification settings
+- **Mission Critical** - Healthcare workload monitoring (Epic, SQL Always On, ASR)
+- **Settings** - Azure connection, automation controls, circuit breakers
 
-**Budget Guardrails**
-- Configurable threshold alerts (60% info, 80% warning, 90% critical)
-- 6 budget categories: Compute, Storage, Network, AI/ML, Database, DR
-- Visual indicators showing 4 healthy, 1 warning, 1 critical status
+### Phase 1: Azure Data Integration
 
-**RI/SP Optimizer**
-- Current RI coverage: 4% with target of 25%
-- AI-powered commitment recommendations with confidence scores
-- Pricing breakdown: MSRP, EA Price (12% AdventHealth discount), RI/SP prices
-- Decision rubric for choosing between Reserved Instances and Savings Plans
+When Azure credentials are configured, the dashboard pulls real data:
 
-## Screenshots
+| Endpoint | Description |
+|----------|-------------|
+| `/api/azure/health` | Connection status check |
+| `/api/azure/costs/daily` | Daily cost breakdown from Azure Cost Management |
+| `/api/azure/costs/by-service` | Cost breakdown by Azure service |
+| `/api/azure/costs/summary` | Cost summary with totals |
+| `/api/azure/recommendations` | Real recommendations from Azure Advisor |
+| `/api/azure/recommendations/savings` | Potential savings from recommendations |
 
-### Command Center
-Real-time anomaly detection with ML model, AI agent fleet status, 6-month forecast, and budget health overview.
+The frontend shows a "LIVE DATA" badge when connected to Azure, or "DEMO DATA" when running with simulated data.
 
-![Command Center](screenshots/command-center.png)
+### Phase 2: Background Scheduler & Historical Tracking
 
-### AI Agents
-View all 9 AI agents with their accuracy scores, actions taken, and savings identified. Includes validator agents for cross-validation.
+Automatic data refresh and historical tracking:
 
-![AI Agents](screenshots/ai-agents.png)
+- **APScheduler** with 4 background jobs:
+  - Hourly cost data refresh
+  - 6-hourly recommendation refresh
+  - Hourly budget status refresh
+  - Hourly anomaly detection (flags spikes >25% above 30-day baseline)
+- **SQLAlchemy models** for historical data persistence
+- **Azure Budgets API** integration for real budget alerts
+
+New endpoints:
+
+| Endpoint | Description |
+|----------|-------------|
+| `/api/history/daily-costs` | Historical daily costs from database |
+| `/api/history/cost-trend` | Weekly cost trends with WoW comparison |
+| `/api/anomalies` | Detected anomalies with status filtering |
+| `/api/azure/budgets` | Budget summary from Azure Consumption API |
+| `/api/scheduler/status` | Background job status and next run times |
+
+Frontend updates:
+- Anomaly alert banner in Command Center when open anomalies detected
+- Scheduler status display in Settings tab showing job status
 
 ### RI/SP Optimizer
-AI-powered commitment recommendations showing MSRP, EA pricing with 12% discount, and RI/SP prices with stability scores.
 
-![RI/SP Optimizer](screenshots/ri-sp-optimizer.png)
+![RI/SP Optimizer](screenshots/ri_sp_optimizer.png)
 
-## Architecture
+AI-powered commitment recommendations with full pricing breakdown:
 
-### Backend (FastAPI + SQLite)
-- RESTful API with 20+ endpoints
-- SQLite database for persistent storage
-- GPT-5 integration via Azure OpenAI for conversational AI
-- Historical anomaly data with root causes and resolutions
+- **MSRP** - Azure retail price
+- **EA Price** - MSRP minus enterprise discount (e.g., 12%)
+- **RI/SP Prices** - Additional discounts:
+  - 1-Year RI: 36% off EA price
+  - 3-Year RI: 56% off EA price
+  - 1-Year SP: 33% off EA price
+  - 3-Year SP: 52% off EA price
 
-### Frontend (React + Tailwind CSS)
-- Dark blue theme with real-time updates
-- 9 tabs: Executive Summary, Command Center, AI Agents, Hidden Cost Hunter, Budget Guardrails, RI/SP Optimizer, Controls & Alerts, Mission Critical, Settings
-- Sonner toast notifications for alerts
-- Investigation workflow modals with email notifications
+Decision rubric helps choose between Reserved Instances (stable workloads, maximum savings) and Savings Plans (flexible workloads, multi-service usage).
 
-### AI Integration
-- Azure OpenAI GPT-5 for conversational queries
-- Data-aware responses that query real database tables
-- Keyword matching for anomalies, budgets, savings, RI coverage
-- Rich text formatting (no markdown) for clean display
+### Alert Investigation Workflow
 
-## Data Sources
+![Alert Investigation](screenshots/alert_investigation.png)
 
-Based on real AdventHealth December 2025 MBR data:
+Click any alert to open the investigation modal:
+- 4-step AI-powered investigation workflow
+- Contextual recommendations based on alert type
+- Email notification to resource owner (simulated)
+- Action buttons: Investigate, Notify Owner, Auto-Remediate, Escalate, Dismiss
 
-| Metric | Value |
-|--------|-------|
-| Total ACR | $2.83M |
-| Daily Rate | $19.6K (+22% YoY) |
-| Monthly Azure Cost | $588K |
-| Storage | 1.5PB ($10.3M) |
-| ADC VMs | $23M |
-| 3P GPU | $43K (+97.6% MoM) |
-| AVD | $410K (+181% YoY) |
-| Azure AI | $62K (+199% YoY) |
-| RI Coverage | 4% (current) |
-| RI Target | 25% |
-| Monthly Savings | $20K |
-| Today's Savings | $1,500 |
+---
 
-## Pricing Structure
+## Future Updates (Not Yet Implemented)
 
-The dashboard uses AdventHealth's enterprise pricing:
+These features are planned for future phases:
 
-1. **MSRP (List Price)** - Azure retail price
-2. **EA Price** - MSRP minus 12% AdventHealth enterprise discount
-3. **RI/SP Prices** - Additional discounts applied to EA price:
-   - 1-Year RI: 36% off EA price
-   - 3-Year RI: 56% off EA price
-   - 1-Year SP: 33% off EA price
-   - 3-Year SP: 52% off EA price
+### Phase 3: Advanced Features
+- Redis caching for improved API performance
+- Azure Resource Graph integration for resource inventory
+- ML-based cost forecasting with Azure ML
+- WebSocket for real-time push updates
+- Expanded anomaly detection algorithms
 
-## AI Agents
+### Phase 4: Enterprise Features
+- Multi-subscription support
+- Role-based access control (RBAC)
+- Azure SQL database migration (from SQLite)
+- Custom report builder
+- Slack/Teams integration for alerts
 
-### Primary Agents
-
-| Agent | Role | Azure Integration | Accuracy |
-|-------|------|-------------------|----------|
-| Cost Sentinel | Real-Time Guardian | Azure Monitor + Logic Apps | 97.3% |
-| Commitment Advisor | RI/SP Optimizer | Cost Management + Advisor | 94.8% |
-| Orphan Hunter | Waste Eliminator | Azure Advisor + Resource Graph | 99.1% |
-| Right-Size Engine | Compute Optimizer | Azure Advisor + ML | 96.5% |
-| Spend Prophet | Predictive Forecaster | Azure ML + FOCUS | 91.2% |
-| Storage Optimizer | Tiering Agent | Storage Analytics + Lifecycle | 96.5% |
-| GPT-5 | Advanced Reasoning | Azure OpenAI Service | 98.7% |
-
-### Validator Agents
-
-| Agent | Role | Validates |
-|-------|------|-----------|
-| Cost Validator | Accuracy Checker | Cost Sentinel |
-| Recommendation Validator | Decision Auditor | Commitment Advisor |
-
-## Circuit Breakers
-
-Automated protection against runaway costs:
-
-- **GPU Burst Shield** - Triggers when GPU costs exceed $500/hr
-- **Egress Flood Gate** - Monitors unusual egress patterns
-- **Storage Tsunami** - Detects storage growth anomalies
-- **VM Sprawl Detector** - Prevents uncontrolled VM provisioning
-- **AI Token Overrun** - Limits AI/ML spending
+---
 
 ## Quick Start
-
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- Poetry (Python package manager)
 
 ### Backend Setup
 
 ```bash
 cd finops-backend
 poetry install
+cp .env.example .env
+# Edit .env with your Azure OpenAI credentials
 poetry run uvicorn app.main:app --reload --port 8000
 ```
 
@@ -173,81 +175,67 @@ npm install
 npm run dev
 ```
 
+The frontend runs at http://localhost:5173 and connects to the backend at http://localhost:8000.
+
 ### Environment Variables
 
-Create a `.env` file in the backend directory:
+Create `.env` in the backend directory:
 
 ```env
-AZURE_OPENAI_ENDPOINT=your-azure-openai-endpoint
+# Azure OpenAI (required for chat)
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-api-key
+AZURE_OPENAI_DEPLOYMENT=gpt-4
+
+# Azure Service Principal (optional - for live data)
+AZURE_TENANT_ID=your-tenant-id
+AZURE_CLIENT_ID=your-client-id
+AZURE_CLIENT_SECRET=your-client-secret
+AZURE_SUBSCRIPTION_ID=your-subscription-id
 ```
 
-## API Endpoints
+---
 
-| Endpoint | Description |
-|----------|-------------|
-| GET /api/stats | Dashboard statistics |
-| GET /api/budgets | Budget status and thresholds |
-| GET /api/agents | AI agent status and performance |
-| GET /api/alerts | Active alerts and notifications |
-| GET /api/anomaly-history | Historical anomaly records |
-| GET /api/recommendations | RI/SP recommendations |
-| GET /api/vms | Virtual machine inventory |
-| GET /api/hidden-costs | Hidden cost categories |
-| GET /api/mission-critical | Mission critical workloads |
-| GET /api/controls | Control settings |
-| GET /api/forecast | 6-month cost forecast |
-| POST /api/chat | Conversational AI queries |
-| POST /api/settings/azure | Azure connection settings |
+## Architecture
 
-## Testing
+### Backend (FastAPI + SQLite)
+- Python 3.11 with FastAPI
+- SQLite for data persistence
+- APScheduler for background jobs
+- SQLAlchemy ORM for historical data
+- Azure SDK for Cost Management, Advisor, and Consumption APIs
 
-30 end-to-end tests covering:
-- API endpoint responses
-- Data accuracy verification
-- Chat response formatting (no markdown)
-- Historical data seeding
-- Budget threshold calculations
-- RI/SP pricing accuracy
+### Frontend (React + TypeScript)
+- React 18 with TypeScript
+- Tailwind CSS for styling
+- Recharts for data visualization
+- Sonner for toast notifications
 
-```bash
-./test_e2e.sh
-```
+### AI Integration
+- Azure OpenAI GPT-5 for conversational queries
+- Data-aware responses querying real database
+- Rich text formatting for clean display
 
-## Deployment
+---
 
-### Backend (Fly.io)
-```bash
-cd finops-backend
-fly deploy
-```
+## Demo Video
 
-### Frontend (Static hosting)
-```bash
-cd finops-frontend
-npm run build
-# Deploy dist/ folder to your hosting provider
-```
+Watch the narrated demo showcasing the dashboard features:
+
+[![FinOps Demo Video](video_assets/screenshots/01_executive_summary.png)](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)
+
+**[Download Demo Video (6.8 MB)](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)**
+
+---
 
 ## Technology Stack
 
-- **Frontend**: React 18, TypeScript, Tailwind CSS, shadcn/ui, Recharts, Sonner
-- **Backend**: FastAPI, SQLite, Python 3.11
+- **Frontend**: React 18, TypeScript, Tailwind CSS, Recharts, Sonner
+- **Backend**: FastAPI, SQLite, SQLAlchemy, APScheduler, Python 3.11
 - **AI**: Azure OpenAI GPT-5
-- **Deployment**: Fly.io (backend), Devin Apps (frontend)
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests
-5. Submit a pull request
+- **Azure SDKs**: azure-mgmt-costmanagement, azure-mgmt-advisor, azure-mgmt-consumption
+- **Deployment**: Fly.io (backend), Static hosting (frontend)
 
 ## License
 
 MIT License
-
-## Contact
-
-For questions or support, please open an issue in this repository.
