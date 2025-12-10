@@ -244,13 +244,23 @@ npm run build
 # Deploy dist/ folder to Vercel, Netlify, or any static host
 ```
 
-## Demo Video
+## Demo Videos
 
-Watch the narrated demo showcasing the dashboard features:
+### RI/SP Decision Workflow Demo
+
+Watch the narrated demo showcasing the RI/SP decision workflow with Approve/Hold/Block buttons and configurable discount settings:
+
+[![RI/SP Decision Workflow](screenshots/risp_optimizer_with_buttons.png)](https://github.com/gregnatkatz/finops/raw/devin/1765376384-phase1-azure-integration/video_assets/finops_risp_demo.mp4)
+
+**[Download RI/SP Demo Video (4.2 MB)](https://github.com/gregnatkatz/finops/raw/devin/1765376384-phase1-azure-integration/video_assets/finops_risp_demo.mp4)**
+
+### Full Dashboard Demo
+
+Watch the complete dashboard walkthrough:
 
 [![FinOps Demo Video](video_assets/screenshots/01_executive_summary.png)](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)
 
-**[Download Demo Video (6.8 MB)](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)**
+**[Download Full Demo Video (6.8 MB)](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)**
 
 ## License
 
