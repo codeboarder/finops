@@ -74,7 +74,7 @@ RI_SP_ANALYSIS_GUIDANCE = """
 - **3-Year**: Maximum savings (up to 72% off MSRP), use for stable workloads
 - **1-Year**: Moderate savings (up to 52% off MSRP), use for growing/uncertain workloads
 
-### Pricing Tiers (AdventHealth):
+### Pricing Tiers (ContosoHealth):
 1. MSRP (List Price) - Base Azure pricing
 2. EA Price = MSRP - 12% (Enterprise Agreement discount)
 3. RI/SP Price = EA Price - additional discount (36-60% depending on term)
@@ -128,7 +128,7 @@ async def call_gpt5_api(user_message: str, context: str = "") -> str:
         "api-key": GPT5_API_KEY,
     }
     
-    system_prompt = f"""You are Azure FinOps Copilot for AdventHealth. You help analyze Azure costs, anomalies, and provide RI/SP recommendations.
+    system_prompt = f"""You are Azure FinOps Copilot for ContosoHealth. You help analyze Azure costs, anomalies, and provide RI/SP recommendations.
 
 Current Context:
 {context}
@@ -344,7 +344,7 @@ async def seed_data(db):
     
     now = datetime.utcnow().isoformat()
     
-    # Budget data - Based on AdventHealth December 2025 MBR
+    # Budget data - Based on ContosoHealth December 2025 MBR
     # 4 healthy (green), 1 warning (yellow), 1 critical (red) - showing 98% healthy
     budgets = [
         ("budget-compute", "Compute (ADC VMs)", 172000, 210000, 185000, "critical"),  # 82% - critical (red) - compute overrun
@@ -754,7 +754,7 @@ async def get_stats():
         cursor = await db.execute("SELECT SUM(monthly_savings) FROM hidden_costs")
         hidden_mitigated = (await cursor.fetchone())[0] or 0
         
-        # AdventHealth December 2025 MBR data
+        # ContosoHealth December 2025 MBR data
         # Daily Rate: $19.6K (+22% YoY), YTD ACR: $2.83M, MACC Goal: $20.3M
         return {
             "monthly_spend": 588000,  # $19.6K daily * 30 days
@@ -1440,7 +1440,7 @@ Based on 90 days of telemetry, SQL-Prod-Primary shows exceptional stability:
 Validated by Recommendation Validator with 97.8% confidence."""
 
     elif "ri" in user_msg or "coverage" in user_msg or "reserved" in user_msg:
-        response = """RI/SP Coverage Analysis (AdventHealth)
+        response = """RI/SP Coverage Analysis (ContosoHealth)
 
 Current State:
   - RI Coverage: 4% (significantly below best practice)
@@ -1481,7 +1481,7 @@ Validated by Commitment Advisor and Recommendation Validator agents."""
         warning = [b for b in budgets_data if 80 <= b.get('percentage', 0) < 90]
         healthy = [b for b in budgets_data if b.get('percentage', 0) < 80]
         
-        response = f"""Budget Health Summary (AdventHealth December 2025)
+        response = f"""Budget Health Summary (ContosoHealth December 2025)
 
 Budget Status:
 {budget_table}
@@ -1492,7 +1492,7 @@ Alerts:
   - Critical (>90%): {len(critical)} budgets
   - Warning (>80%): {len(warning)} budgets
 
-AdventHealth MBR Metrics:
+ContosoHealth MBR Metrics:
   - Daily Rate: $19.6K (+22% YoY)
   - YTD ACR: $2.83M
   - MACC Goal: $20.3M (24.5% progress)
@@ -1500,7 +1500,7 @@ AdventHealth MBR Metrics:
 
     elif "saving" in user_msg or "cost" in user_msg:
         resolved_savings = sum(a['cost_impact'] or 0 for a in anomalies if a['status'] == 'resolved')
-        response = f"""Cost Savings Summary (AdventHealth)
+        response = f"""Cost Savings Summary (ContosoHealth)
 
 Monthly AI-Identified Savings: $20,000
 Today's Savings Achieved: $1,500
@@ -2323,7 +2323,7 @@ async def run_primary_analyzer(recommendations: list) -> dict:
         "annual_savings": r.get("annual_savings", 0),
     } for r in recommendations[:10]], indent=2)  # Limit to 10 for prompt size
     
-    system_prompt = f"""You are the Primary RI/SP Analyzer for AdventHealth Azure FinOps.
+    system_prompt = f"""You are the Primary RI/SP Analyzer for ContosoHealth Azure FinOps.
 
 {RI_SP_ANALYSIS_GUIDANCE}
 
@@ -2349,7 +2349,7 @@ Respond ONLY with valid JSON in this exact format:
   ]
 }}"""
 
-    user_prompt = f"""Analyze these RI/SP recommendations for AdventHealth:
+    user_prompt = f"""Analyze these RI/SP recommendations for ContosoHealth:
 
 Current RI Coverage: 4%
 Target RI Coverage: 25%
@@ -2391,7 +2391,7 @@ async def run_validation_agent(recommendations: list, primary_analysis: dict) ->
     
     primary_summary = json.dumps(primary_analysis.get("analysis", {}), indent=2)
     
-    system_prompt = f"""You are the Validation Agent for AdventHealth Azure FinOps using O3 Large Reasoning Model.
+    system_prompt = f"""You are the Validation Agent for ContosoHealth Azure FinOps using O3 Large Reasoning Model.
 
 {RI_SP_VALIDATION_GUIDANCE}
 
