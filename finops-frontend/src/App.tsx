@@ -3,7 +3,7 @@ import './App.css'
 import { 
   Activity, TrendingUp, Shield, Zap, AlertTriangle, CheckCircle, 
   DollarSign, Bot, Target, Brain, Sparkles, 
-  Search, Bell, RefreshCw, Settings,
+  Search, Bell, RefreshCw, Settings, Clock,
   Cloud, Layers, Lock, Key, Globe, Server,
   Power, Sliders, MessageSquare, Send, X, Save, Play, Loader2
 } from 'lucide-react'
@@ -47,19 +47,38 @@ function App() {
     const [alertModalOpen, setAlertModalOpen] = useState(false)
     const [workflowStep, setWorkflowStep] = useState(0)
     const [investigationRunning, setInvestigationRunning] = useState(false)
-        const [emailStage, setEmailStage] = useState<'idle' | 'preview' | 'sent'>('idle')
-        const [dataSource, setDataSource] = useState<'azure' | 'demo'>('demo')
+                const [emailStage, setEmailStage] = useState<'idle' | 'preview' | 'sent'>('idle')
+                const [dataSource, setDataSource] = useState<'azure' | 'demo'>('demo')
+                const [detectedAnomalies, setDetectedAnomalies] = useState<any[]>([])
+                const [schedulerStatus, setSchedulerStatus] = useState<any>(null)
 
               const fetchData = useCallback(async () => {
             try {
-              // Check Azure health first
-              try {
-                const healthRes = await fetch(`${API_URL}/api/azure/health`)
-                const health = await healthRes.json()
-                setDataSource(health.status === 'connected' ? 'azure' : 'demo')
-              } catch {
-                setDataSource('demo')
-              }
+                            // Check Azure health first
+                            try {
+                              const healthRes = await fetch(`${API_URL}/api/azure/health`)
+                              const health = await healthRes.json()
+                              setDataSource(health.status === 'connected' ? 'azure' : 'demo')
+                            } catch {
+                              setDataSource('demo')
+                            }
+              
+                            // Fetch Phase 2 data (anomalies and scheduler status)
+                            try {
+                              const anomalyRes = await fetch(`${API_URL}/api/anomalies?status=open`)
+                              const anomalyData = await anomalyRes.json()
+                              setDetectedAnomalies(anomalyData.anomalies || [])
+                            } catch {
+                              setDetectedAnomalies([])
+                            }
+              
+                            try {
+                              const schedRes = await fetch(`${API_URL}/api/scheduler/status`)
+                              const schedData = await schedRes.json()
+                              setSchedulerStatus(schedData)
+                            } catch {
+                              setSchedulerStatus(null)
+                            }
         
               const endpoints = ['stats', 'agents', 'hidden-costs', 'budgets', 'recommendations', 'controls', 'alert-config', 'mission-critical', 'alerts', 'anomaly-data', 'variance-data', 'forecast', 'azure-config', 'control-settings', 'circuit-breakers']
               const results = await Promise.all(endpoints.map(e => fetch(`${API_URL}/api/${e}`).then(r => r.json()).catch(() => null)))
@@ -577,9 +596,24 @@ function App() {
           </div>
         )}
 
-        {activeTab === 'command' && stats && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-6 gap-4">
+                {activeTab === 'command' && stats && (
+                  <div className="space-y-6">
+                    {/* Phase 2: Anomaly Alert Banner */}
+                    {detectedAnomalies.length > 0 && (
+                      <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-5 h-5 text-red-400" />
+                          <span className="text-red-400 font-medium">
+                            {detectedAnomalies.length} cost anomal{detectedAnomalies.length > 1 ? 'ies' : 'y'} detected
+                          </span>
+                        </div>
+                        <div className="mt-2 text-sm text-red-300">
+                          {detectedAnomalies[0]?.date}: ${detectedAnomalies[0]?.actual?.toLocaleString()} 
+                          ({detectedAnomalies[0]?.variance_pct > 0 ? '+' : ''}{detectedAnomalies[0]?.variance_pct}% vs baseline)
+                        </div>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-6 gap-4">
               {[
                 { label: 'MONTHLY SPEND', value: fmt(stats.monthly_spend), change: '-8.2%', icon: DollarSign },
                 { label: 'AI SAVINGS', value: fmt(stats.ai_savings), change: '+15.3%', icon: Brain, highlight: true },
@@ -1012,26 +1046,53 @@ function App() {
               </div>
             </div>
 
-            <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
-              <div className="flex items-center gap-3 mb-6"><Zap className="w-5 h-5 text-red-400" /><h3 className="font-semibold text-white">Circuit Breaker Thresholds</h3></div>
-              <div className="grid grid-cols-5 gap-4">
-                {Object.entries(circuitBreakers).map(([id, settings]: [string, any]) => (
-                  <div key={id} className="bg-slate-800/50 rounded-xl p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <p className="text-sm font-medium text-white capitalize">{id.replace(/-/g, ' ')}</p>
-                      <span className={`w-2 h-2 rounded-full ${settings.enabled ? 'bg-green-400' : 'bg-red-400'}`} />
+                    <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                      <div className="flex items-center gap-3 mb-6"><Zap className="w-5 h-5 text-red-400" /><h3 className="font-semibold text-white">Circuit Breaker Thresholds</h3></div>
+                      <div className="grid grid-cols-5 gap-4">
+                        {Object.entries(circuitBreakers).map(([id, settings]: [string, any]) => (
+                          <div key={id} className="bg-slate-800/50 rounded-xl p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <p className="text-sm font-medium text-white capitalize">{id.replace(/-/g, ' ')}</p>
+                              <span className={`w-2 h-2 rounded-full ${settings.enabled ? 'bg-green-400' : 'bg-red-400'}`} />
+                            </div>
+                            <div className="space-y-2">
+                              <input type="number" value={settings.threshold} onChange={(e) => updateCircuitBreaker(id, Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+                              <p className="text-xs text-slate-500">{settings.unit}</p>
+                              <p className="text-xs text-blue-400">Action: {settings.action}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <input type="number" value={settings.threshold} onChange={(e) => updateCircuitBreaker(id, Number(e.target.value))} className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
-                      <p className="text-xs text-slate-500">{settings.unit}</p>
-                      <p className="text-xs text-blue-400">Action: {settings.action}</p>
+
+                    {/* Phase 2: Background Jobs Status */}
+                    <div className="bg-slate-900 rounded-xl border border-slate-800 p-6">
+                      <div className="flex items-center gap-3 mb-6"><Clock className="w-5 h-5 text-cyan-400" /><h3 className="font-semibold text-white">Background Jobs</h3></div>
+                      {schedulerStatus ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 mb-4">
+                            <span className={`w-2 h-2 rounded-full ${schedulerStatus.running ? 'bg-green-400' : 'bg-red-400'}`} />
+                            <span className="text-sm text-slate-400">Scheduler {schedulerStatus.running ? 'Running' : 'Stopped'}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            {schedulerStatus.jobs?.map((job: any) => (
+                              <div key={job.id} className="flex justify-between items-center bg-slate-800/50 rounded-lg p-3">
+                                <span className="text-sm text-white">{job.name}</span>
+                                <span className="text-xs text-slate-400">Next: {job.next_run ? new Date(job.next_run).toLocaleTimeString() : 'N/A'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-32 text-slate-500">
+                          <Clock className="w-8 h-8 mb-2 opacity-50" />
+                          <p className="text-sm">Scheduler not available</p>
+                          <p className="text-xs mt-1">Phase 2 features require Azure connection</p>
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+                )}
       </main>
 
       {/* Chat Widget */}
