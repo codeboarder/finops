@@ -3,7 +3,7 @@ import './App.css'
 import { 
   Activity, TrendingUp, Shield, Zap, AlertTriangle, CheckCircle, 
   DollarSign, Bot, Target, Brain, Sparkles, 
-  Search, Bell, RefreshCw, Settings,
+  Search, Bell, RefreshCw, Settings, Clock,
   Cloud, Layers, Lock, Key, Globe, Server,
   Power, Sliders, MessageSquare, Send, X, Save, Play, Loader2
 } from 'lucide-react'
