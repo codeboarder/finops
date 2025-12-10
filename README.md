@@ -4,9 +4,11 @@ An AI-powered Azure FinOps dashboard that automates cost optimization, RI/SP com
 
 ## Demo Video
 
-Watch the complete 4-minute walkthrough demonstrating the RI/SP decision workflow, SaaS evaluation tracking, document upload, and human-in-the-loop governance:
+Watch the complete walkthrough demonstrating the RI/SP decision workflow, SaaS evaluation tracking, document upload, and human-in-the-loop governance:
 
-https://github.com/user-attachments/assets/finops-demo-video
+[![FinOps Demo Video](video_assets/screenshots/01_executive_summary.png)](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)
+
+**[Download Full Demo Video](https://github.com/gregnatkatz/finops/raw/mainbr/video_assets/finops_demo.mp4)**
 
 The demo showcases a real healthcare scenario: AdventHealth's Patient Front Door application (SQL Server + Windows VMs) being evaluated against PatientRUs App, a call center SaaS solution with 70% adoption probability.
 
@@ -27,6 +29,8 @@ Reserved Instances (RI) and Savings Plans (SP) can reduce Azure compute costs by
 
 The Executive Summary provides a real-time view of your Azure FinOps posture:
 
+![Executive Summary with RI/SP Actions](screenshots/executive_summary_risp_actions.png)
+
 - **Monthly Azure Cost**: $588K with daily rate tracking
 - **Monthly Savings**: $20K with month-over-month comparison
 - **Anomalies Resolved**: 9/12 this month with resolution timeline
@@ -43,6 +47,8 @@ The **RI/SP Recommendation Actions** card tracks all your commitment decisions:
 ### RI/SP Optimizer
 
 The RI/SP Optimizer is the core decision-making interface:
+
+![RI/SP Optimizer with Decision Buttons](screenshots/risp_optimizer_with_buttons.png)
 
 **Coverage Metrics**
 - Current RI Coverage: 4%
@@ -113,6 +119,8 @@ Click any recommendation to open the deep-dive drawer with:
 - BLOCK: Reject the recommendation
 
 ### Settings & Configuration
+
+![Settings - Discount Configuration](screenshots/settings_discount_settings.png)
 
 **RI/SP Discount Settings**
 
