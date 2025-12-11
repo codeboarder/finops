@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useCallback } from 'react'
 import './App.css'
 import { 
@@ -154,7 +155,7 @@ function App() {
       const res = await fetch(`${API_URL}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg }) })
       const data = await res.json()
       setChatMessages(prev => [...prev, { role: 'assistant', content: data.response }])
-    } catch (e) {
+    } catch {
       setChatMessages(prev => [...prev, { role: 'assistant', content: 'Error connecting to AI.' }])
     }
   }
@@ -167,7 +168,7 @@ function App() {
     const a = setTimeout(generateDemoAlert, 5000)
     const alertInterval = setInterval(generateDemoAlert, 60000) // Generate alert every 60 seconds
     return () => { clearInterval(d); clearInterval(t); clearInterval(c); clearTimeout(a); clearInterval(alertInterval) }
-  }, [fetchData, simulateTick])
+  }, [fetchData, generateDemoAlert, simulateTick])
 
   const openAlertWorkflow = (alert: any) => {
     setSelectedAlert(alert)
@@ -302,7 +303,7 @@ function App() {
         const res = await fetch(`${API_URL}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg, context: 'executive' }) })
         const data = await res.json()
         setExecChatMessages(prev => [...prev, { role: 'assistant', content: data.response }])
-      } catch (e) {
+      } catch {
         setExecChatMessages(prev => [...prev, { role: 'assistant', content: 'Error connecting to AI.' }])
       }
     }
@@ -321,7 +322,7 @@ function App() {
         } else {
           toast.error('Connection failed', { description: testData.message })
         }
-      } catch (e) { toast.error('Failed to save configuration') }
+      } catch { toast.error('Failed to save configuration') }
       setIsConnecting(false)
     }
 
@@ -336,7 +337,7 @@ function App() {
         } else {
           toast.error('Discovery failed', { description: data.message })
         }
-      } catch (e) { toast.error('Discovery failed') }
+      } catch { toast.error('Discovery failed') }
       setIsDiscovering(false)
     }
 
@@ -348,7 +349,7 @@ function App() {
           setControlSettings((prev: any) => ({ ...prev, [controlId]: { ...prev[controlId], enabled: data.enabled } }))
           toast.success(`Control ${data.enabled ? 'enabled' : 'disabled'}`)
         }
-      } catch (e) { toast.error('Failed to toggle control') }
+      } catch { toast.error('Failed to toggle control') }
     }
 
     const updateCircuitBreaker = async (breakerId: string, threshold: number) => {
@@ -356,7 +357,7 @@ function App() {
         await fetch(`${API_URL}/api/circuit-breakers/${breakerId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ threshold }) })
         setCircuitBreakers((prev: any) => ({ ...prev, [breakerId]: { ...prev[breakerId], threshold } }))
         toast.success('Circuit breaker updated')
-      } catch (e) { toast.error('Failed to update') }
+      } catch { toast.error('Failed to update') }
     }
 
   const fmt = (v?: number | null) => {
@@ -377,7 +378,7 @@ function App() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-white">FinOps AI Command Center</h1>
-                <p className="text-xs text-slate-400">AdventHealth Azure Cost Intelligence</p>
+                <p className="text-xs text-slate-400">Azure Cost Intelligence</p>
               </div>
               <button onClick={() => setIsLive(!isLive)} className={`ml-4 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${isLive ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-slate-700 text-slate-400'}`}>
                 <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-400 animate-pulse' : 'bg-slate-500'}`} />
