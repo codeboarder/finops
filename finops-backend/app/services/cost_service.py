@@ -2,7 +2,7 @@
 Service for fetching cost data from Azure Cost Management API.
 """
 from datetime import datetime, timedelta
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from azure.mgmt.costmanagement.models import (
     QueryDefinition,
     QueryTimePeriod,
@@ -13,14 +13,15 @@ from azure.mgmt.costmanagement.models import (
     GranularityType,
     ExportType
 )
-from .azure_client import get_azure_manager
+from .azure_client import AzureClientManager
 
 
 class CostService:
     """Fetches and processes Azure cost data."""
     
-    def __init__(self):
-        self.azure = get_azure_manager()
+    def __init__(self, tenant_id: str = None, client_id: str = None,
+                 client_secret: str = None, subscription_id: str = None):
+        self.azure = AzureClientManager(tenant_id, client_id, client_secret, subscription_id)
         self.scope = f"/subscriptions/{self.azure.subscription_id}"
     
     def get_daily_costs(self, days: int = 30) -> List[Dict[str, Any]]:

@@ -3,14 +3,15 @@ Service for fetching Azure Budget data.
 """
 from datetime import datetime
 from typing import Dict, List, Any
-from .azure_client import get_azure_manager
+from .azure_client import AzureClientManager
 
 
 class BudgetService:
     """Fetches Azure Budget configurations and status."""
     
-    def __init__(self):
-        self.azure = get_azure_manager()
+    def __init__(self, tenant_id: str = None, client_id: str = None,
+                 client_secret: str = None, subscription_id: str = None):
+        self.azure = AzureClientManager(tenant_id, client_id, client_secret, subscription_id)
         self.scope = f"/subscriptions/{self.azure.subscription_id}"
     
     def get_all_budgets(self) -> List[Dict[str, Any]]:

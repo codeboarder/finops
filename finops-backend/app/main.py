@@ -10,6 +10,10 @@ from datetime import datetime, timedelta
 import json
 import httpx
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Azure service imports - Phase 1
 try:
@@ -17,9 +21,10 @@ try:
     from app.services.recommendation_service import RecommendationService
     from app.services.budget_service import BudgetService
     AZURE_SERVICES_AVAILABLE = True
-except ImportError:
+    print("Azure service classes imported successfully")
+except Exception as e:
     AZURE_SERVICES_AVAILABLE = False
-    print("Azure services not available - running in demo mode")
+    print(f"Azure services not available - running in demo mode: {e}")
 
 # Phase 2 imports
 try:
@@ -31,12 +36,91 @@ except ImportError:
     PHASE2_AVAILABLE = False
     print("Phase 2 features not available")
 
-# GPT-5 API Configuration (Azure OpenAI)
-# Set these environment variables for GPT-5 integration:
-# GPT5_ENDPOINT - Azure OpenAI endpoint URL
-# GPT5_API_KEY - Azure OpenAI API key
-GPT5_ENDPOINT = os.getenv("GPT5_ENDPOINT", "https://pharma-agents-jnj-resource.cognitiveservices.azure.com/openai/deployments/gpt-5/chat/completions?api-version=2025-01-01-preview")
+# Multi-Model AI Configuration (Azure OpenAI)
+# GPT-5: Primary RI/SP Analyzer
+GPT5_ENDPOINT = os.getenv("GPT5_ENDPOINT", "")
 GPT5_API_KEY = os.getenv("GPT5_API_KEY", "")
+
+# O3: Validation Agent (Large Reasoning Model)
+O3_ENDPOINT = os.getenv("O3_ENDPOINT", "")
+O3_API_KEY = os.getenv("O3_API_KEY", "")
+
+# O4-Mini: Secondary Validator
+O4_MINI_ENDPOINT = os.getenv("O4_MINI_ENDPOINT", "")
+O4_MINI_API_KEY = os.getenv("O4_MINI_API_KEY", "")
+
+# GPT-4.1: Alternative Analyzer
+GPT41_ENDPOINT = os.getenv("GPT41_ENDPOINT", "")
+GPT41_API_KEY = os.getenv("GPT41_API_KEY", "")
+
+# RI/SP Analysis Guidance - Reference for AI Agents
+RI_SP_ANALYSIS_GUIDANCE = """
+## RI/SP Analysis Guidance for Azure FinOps
+
+### When to Recommend Reserved Instances (RI):
+1. **Workload Stability**: VM has >85% stability score over 90 days
+2. **Consistent Usage**: Resource runs 24/7 or on predictable schedule
+3. **Known Capacity**: Specific VM size/region requirements are fixed
+4. **Long-term Commitment**: Organization can commit to 1-3 year term
+5. **Specific Services**: SQL, SAP, RHEL, Windows Server with consistent sizing
+
+### When to Recommend Savings Plans (SP):
+1. **Workload Flexibility**: Need to change VM sizes/families
+2. **Growth Patterns**: Workload growing >10% monthly
+3. **Multi-region**: Resources may move between regions
+4. **Compute Diversity**: Mix of VMs, containers, serverless
+5. **Uncertainty**: New workloads without usage history
+
+### Term Selection:
+- **3-Year**: Maximum savings (up to 72% off MSRP), use for stable workloads
+- **1-Year**: Moderate savings (up to 52% off MSRP), use for growing/uncertain workloads
+
+### Pricing Tiers (ContosoHealth):
+1. MSRP (List Price) - Base Azure pricing
+2. EA Price = MSRP - 12% (Enterprise Agreement discount)
+3. RI/SP Price = EA Price - additional discount (36-60% depending on term)
+
+### Risk Assessment:
+- LOW: Stable workload, 3-year commitment appropriate
+- MEDIUM: Some variability, 1-year commitment recommended
+- HIGH: Volatile workload, consider SP over RI or no commitment
+"""
+
+RI_SP_VALIDATION_GUIDANCE = """
+## RI/SP Validation Guidance for Azure FinOps
+
+### Validation Checklist:
+1. **Verify Workload Classification**: Is the stability score accurate?
+2. **Check Growth Trajectory**: Does recommendation account for growth?
+3. **Validate Term Selection**: Is commitment length appropriate for risk?
+4. **Cross-check Pricing**: Are savings calculations accurate?
+5. **Assess Flexibility Needs**: Does workload need SP flexibility?
+
+### Red Flags to Identify:
+- RI recommended for workload with >15% growth rate
+- 3-year term for workload with <80% stability
+- SP recommended when RI would save significantly more
+- Missing consideration of ASR/DR requirements
+- Ignoring SQL Always On licensing implications
+
+### Validation Verdicts:
+- VALIDATED: Recommendation is sound, proceed with confidence
+- ADJUSTED: Minor changes suggested to improve recommendation
+- FLAGGED: Significant concerns, requires human review
+- REJECTED: Recommendation has critical issues
+
+### Confidence Scoring:
+- 90-100%: High confidence, strong data support
+- 70-89%: Moderate confidence, some assumptions made
+- 50-69%: Low confidence, limited data or high uncertainty
+- <50%: Very low confidence, recommend manual review
+"""
+
+# Cache for AI analysis results
+ai_analysis_cache = {
+    "snapshot_date": None,
+    "result": None
+}
 
 async def call_gpt5_api(user_message: str, context: str = "") -> str:
     """Call GPT-5 via Azure OpenAI"""
@@ -94,7 +178,47 @@ class AzureConfig(BaseModel):
     tenant_id: str
     client_id: str
     client_secret: str
-    subscription_id: str
+
+# Pydantic models for offline data import
+class OfflineRIRecommendation(BaseModel):
+    vm_name: str
+    vm_size: str
+    region: str
+    os_type: str
+    term: str  # "1-Year" or "3-Year"
+    recommendation_type: str  # "RI" or "SP"
+    current_monthly_cost: float
+    recommended_monthly_cost: float
+    monthly_savings: float
+    annual_savings: float
+
+class OfflineDailyCost(BaseModel):
+    date: str  # YYYY-MM-DD
+    cost: float
+    currency: str = "USD"
+    service: str = None
+    resource_group: str = None
+
+class OfflineBudget(BaseModel):
+    name: str
+    amount: float
+    current_spend: float
+    time_grain: str = "Monthly"
+    category: str = "Cost"
+
+class OfflineDataImport(BaseModel):
+    ri_recommendations: List[OfflineRIRecommendation] = []
+    daily_costs: List[OfflineDailyCost] = []
+    budgets: List[OfflineBudget] = []
+
+# Storage for imported offline data
+offline_data_store = {
+    "ri_recommendations": [],
+    "daily_costs": [],
+    "budgets": [],
+    "imported_at": None,
+    "source": "none"  # "none", "imported", "live"
+}
 
 # In-memory storage for Azure config (would be encrypted in production)
 azure_config_store = {}
@@ -490,6 +614,82 @@ cost_service = None
 recommendation_service = None
 budget_service = None
 
+def seed_phase3_demo_data():
+    """Seed demo workloads and evaluations for Phase 3.
+    
+    Uses is_demo flag to separate demo data from user-created data.
+    Demo data persists across restarts and is only seeded once.
+    """
+    if not PHASE3_AVAILABLE:
+        return
+    
+    from datetime import date, timedelta
+    
+    with get_db() as db:
+        # Check if demo data already exists (not just any workloads)
+        existing_demo = db.query(Workload).filter(Workload.is_demo == True).count()
+        if existing_demo > 0:
+            print(f"Phase 3 already has {existing_demo} demo workloads, skipping seed")
+            return
+        
+        # Create demo workloads
+        workloads_data = [
+            {"name": "Patient Front Door", "description": "Patient scheduling, check-in, and call center application running on SQL Server and Windows VMs", "owner_name": "Jennifer Martinez", "owner_email": "jennifer.martinez@adventhealth.org", "status": "evaluating", "criticality": "mission_critical"},
+            {"name": "PACS Imaging", "description": "Picture Archiving and Communication System for radiology imaging storage and retrieval", "owner_name": "Dr. Sarah Chen", "owner_email": "sarah.chen@adventhealth.org", "status": "active", "criticality": "mission_critical"},
+            {"name": "Epic Integration", "description": "Epic EHR integration layer running on RHEL VMs", "owner_name": "Mike Johnson", "owner_email": "mike.johnson@adventhealth.org", "status": "active", "criticality": "mission_critical"},
+            {"name": "Data Analytics Platform", "description": "Azure Synapse-based analytics for population health insights", "owner_name": "Lisa Park", "owner_email": "lisa.park@adventhealth.org", "status": "evaluating", "criticality": "high"},
+            {"name": "ASR Disaster Recovery", "description": "Azure Site Recovery for business continuity", "owner_name": "Tom Williams", "owner_email": "tom.williams@adventhealth.org", "status": "active", "criticality": "high"},
+            {"name": "ML Training Pipeline", "description": "GPU-based machine learning for diagnostic imaging AI", "owner_name": "Dr. James Lee", "owner_email": "james.lee@adventhealth.org", "status": "active", "criticality": "standard"},
+        ]
+        
+        created_workloads = []
+        for wl_data in workloads_data:
+            wl = Workload(
+                name=wl_data["name"],
+                description=wl_data["description"],
+                owner_name=wl_data["owner_name"],
+                owner_email=wl_data["owner_email"],
+                status=WorkloadStatus(wl_data["status"]),
+                criticality=wl_data["criticality"],
+                is_demo=True,  # Mark as demo data for persistence
+                demo_scenario="adventhealth"
+            )
+            db.add(wl)
+            db.flush()
+            created_workloads.append(wl)
+        
+        # Create demo evaluations
+        evaluations_data = [
+            {"name": "PatientRUs App", "vendor": "PatientRUs Inc.", "workload_idx": 0, "evaluation_type": "saas_replacement", "status": "poc", "decision_date": date.today() + timedelta(days=60), "adoption_probability_pct": 70, "poc_success_score": 82, "hold_commitments": True, "affected_azure_services": ["SQL Server", "Windows VMs", "Azure Load Balancer"], "executive_sponsor": "Dr. Amanda Foster"},
+            {"name": "Snowflake Enterprise", "vendor": "Snowflake", "workload_idx": 3, "evaluation_type": "saas_replacement", "status": "poc", "decision_date": date.today() + timedelta(days=90), "adoption_probability_pct": 65, "poc_success_score": 78, "hold_commitments": True, "affected_azure_services": ["Azure Synapse", "Azure Data Lake"]},
+            {"name": "Databricks Unity Catalog", "vendor": "Databricks", "workload_idx": 3, "evaluation_type": "saas_replacement", "status": "evaluating", "decision_date": date.today() + timedelta(days=120), "adoption_probability_pct": 45, "hold_commitments": True, "affected_azure_services": ["Azure Synapse", "Azure ML"]},
+            {"name": "Google Cloud Healthcare API", "vendor": "Google Cloud", "workload_idx": 1, "evaluation_type": "saas_replacement", "status": "evaluating", "decision_date": date.today() + timedelta(days=180), "adoption_probability_pct": 25, "hold_commitments": False, "affected_azure_services": ["Azure Health Data Services"]},
+        ]
+        
+        for eval_data in evaluations_data:
+            ev = TechnologyEvaluation(
+                workload_id=created_workloads[eval_data["workload_idx"]].id,
+                name=eval_data["name"],
+                vendor=eval_data["vendor"],
+                evaluation_type=eval_data["evaluation_type"],
+                status=EvaluationStatus(eval_data["status"]),
+                started_date=date.today() - timedelta(days=30),
+                decision_date=eval_data["decision_date"],
+                adoption_probability_pct=eval_data["adoption_probability_pct"],
+                poc_success_score=eval_data.get("poc_success_score"),
+                hold_commitments=eval_data["hold_commitments"],
+                hold_expires=eval_data["decision_date"] + timedelta(days=14) if eval_data["hold_commitments"] else None,
+                affected_azure_services=eval_data["affected_azure_services"],
+                executive_sponsor=eval_data.get("executive_sponsor"),
+                is_demo=True,  # Mark as demo data for persistence
+                demo_scenario="adventhealth"
+            )
+            db.add(ev)
+        
+        db.commit()
+        print(f"Phase 3 seeded: {len(workloads_data)} workloads, {len(evaluations_data)} evaluations")
+
+
 @app.on_event("startup")
 async def startup():
     global cost_service, recommendation_service, budget_service
@@ -502,6 +702,13 @@ async def startup():
             print("Phase 2 history database initialized")
         except Exception as e:
             print(f"Phase 2 database init failed: {e}")
+    
+    # Seed Phase 3 demo data
+    if PHASE3_AVAILABLE:
+        try:
+            seed_phase3_demo_data()
+        except Exception as e:
+            print(f"Phase 3 seed failed: {e}")
     
     # Initialize Azure services if available and configured
     if AZURE_SERVICES_AVAILABLE:
@@ -868,6 +1075,57 @@ async def get_agents():
 # RI/SP Recommendations
 @app.get("/api/recommendations")
 async def get_recommendations():
+    # Use configurable discount settings
+    EA_DISCOUNT = discount_settings["ea_discount"] / 100
+    RI_1Y_DISCOUNT = discount_settings["ri_1year_discount"] / 100
+    RI_3Y_DISCOUNT = discount_settings["ri_3year_discount"] / 100
+    SP_1Y_DISCOUNT = discount_settings["sp_1year_discount"] / 100
+    SP_3Y_DISCOUNT = discount_settings["sp_3year_discount"] / 100
+    
+    # Check for offline imported data first
+    if offline_data_store["source"] == "imported" and offline_data_store["ri_recommendations"]:
+        recommendations = []
+        for rec in offline_data_store["ri_recommendations"]:
+            # Transform offline data to match expected response format
+            msrp = rec["current_monthly_cost"] / (1 - EA_DISCOUNT)  # Back-calculate MSRP from EA price
+            ea_price = rec["current_monthly_cost"]
+            
+            # Determine discounts based on term and type (use configurable values)
+            if "3-Year" in rec["term"]:
+                ri_discount = RI_3Y_DISCOUNT
+                sp_discount = SP_3Y_DISCOUNT
+            else:
+                ri_discount = RI_1Y_DISCOUNT
+                sp_discount = SP_1Y_DISCOUNT
+            
+            ri_price = ea_price * (1 - ri_discount)
+            sp_price = ea_price * (1 - sp_discount)
+            
+            recommendations.append({
+                "resource": rec["vm_name"],
+                "type": rec["vm_size"],
+                "msrp": round(msrp, 0),
+                "ea_price": round(ea_price, 0),
+                "ea_discount": "12%",
+                "ri_price": round(ri_price, 0),
+                "sp_price": round(sp_price, 0),
+                "ri_discount": f"{int(ri_discount * 100)}%",
+                "sp_discount": f"{int(sp_discount * 100)}%",
+                "monthly_cost": round(ea_price, 0),
+                "stability": 95,
+                "recommendation": f"{rec['term']} {rec['recommendation_type']}",
+                "ri_savings": round(ea_price - ri_price, 0),
+                "sp_savings": round(ea_price - sp_price, 0),
+                "total_ri_savings": round(msrp - ri_price, 0),
+                "total_sp_savings": round(msrp - sp_price, 0),
+                "confidence": 0.92,
+                "reasoning": f"Based on Azure Advisor analysis for {rec['region']} region. {rec['os_type']} workload with stable usage pattern.",
+                "data_source": "SNAPSHOT",
+                "snapshot_date": offline_data_store["imported_at"]
+            })
+        return recommendations
+    
+    # Fall back to database data
     async with aiosqlite.connect(DATABASE) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute('''
@@ -878,16 +1136,8 @@ async def get_recommendations():
         ''')
         rows = await cursor.fetchall()
         
-        # Pricing structure for AdventHHealthCoealth:
-        # 1. MSRP (List Price) - Azure retail price
-        # 2. EA Price = MSRP - 12% (HealthCo Enterprise Agreement discount)
-        # 3. RI/SP discounts are applied ON TOP of EA price:
-        #    - 1-Year RI: 36% off EA price
-        #    - 3-Year RI: 56% off EA price
-        #    - 1-Year SP: 33% off EA price
-        #    - 3-Year SP: 52% off EA price
-        
-        EA_DISCOUNT = 0.12  # HealthCo's 12% Enterprise Agreement discount
+        # Pricing structure uses configurable discount settings
+        # EA/RI/SP discounts are now configurable via /api/discount-settings
         
         recommendations = []
         for row in rows:
@@ -895,23 +1145,22 @@ async def get_recommendations():
             msrp = vm["monthly_cost"]  # This is the MSRP/List price
             rec = vm["recommendation"]
             
-            # Calculate EA price (PAYG with 12% discount)
+            # Calculate EA price using configurable discount
             ea_price = msrp * (1 - EA_DISCOUNT)
             
-            # Calculate RI/SP discounts based on recommendation type
-            # These are applied ON TOP of the EA price
+            # Calculate RI/SP discounts based on recommendation type (use configurable values)
             if "3-Year RI" in rec:
-                ri_discount = 0.56
-                sp_discount = 0.52
+                ri_discount = RI_3Y_DISCOUNT
+                sp_discount = SP_3Y_DISCOUNT
             elif "1-Year RI" in rec:
-                ri_discount = 0.36
-                sp_discount = 0.33
+                ri_discount = RI_1Y_DISCOUNT
+                sp_discount = SP_1Y_DISCOUNT
             elif "3-Year SP" in rec:
-                ri_discount = 0.56
-                sp_discount = 0.52
+                ri_discount = RI_3Y_DISCOUNT
+                sp_discount = SP_3Y_DISCOUNT
             else:  # 1-Year SP or other
-                ri_discount = 0.36
-                sp_discount = 0.33
+                ri_discount = RI_1Y_DISCOUNT
+                sp_discount = SP_1Y_DISCOUNT
             
             # Final prices with RI/SP applied to EA price
             ri_price = ea_price * (1 - ri_discount)
@@ -929,8 +1178,8 @@ async def get_recommendations():
                 "resource": vm["name"],
                 "type": vm["vm_type"],
                 "msrp": round(msrp, 0),  # List price
-                "ea_price": round(ea_price, 0),  # PAYG + 12% EA discount (current price)
-                "ea_discount": "12%",
+                "ea_price": round(ea_price, 0),  # PAYG + EA discount (current price)
+                "ea_discount": f"{int(EA_DISCOUNT * 100)}%",
                 "ri_price": round(ri_price, 0),  # With RI on top of EA
                 "sp_price": round(sp_price, 0),  # With SP on top of EA
                 "ri_discount": f"{int(ri_discount * 100)}%",
@@ -1052,7 +1301,7 @@ async def get_variance_data():
         {"day": "Sun", "variance": -0.5},
     ]
 
-# Chat endpoint (simulated AI)
+# Chat endpoint - ALWAYS tries GPT-5 first, falls back to data-aware responses
 @app.post("/api/chat")
 async def chat(message: ChatMessage):
     user_msg = message.message.lower()
@@ -1072,6 +1321,47 @@ async def chat(message: ChatMessage):
         for b in budgets_data:
             if b.get('allocated') and b.get('current'):
                 b['percentage'] = round((b['current'] / b['allocated']) * 100, 1)
+    
+    # Build rich context for GPT-5
+    resolved_anomalies = [a for a in anomalies if a['status'] == 'resolved']
+    critical_budgets = [b for b in budgets_data if b.get('percentage', 0) >= 80]
+    
+    context = f"""ContosoHealth FinOps Dashboard - Live Data Context:
+
+AZURE SPEND:
+- Monthly Azure Cost: $588K ($19.6K daily rate)
+- YTD ACR: $2.83M
+- RI Coverage: 4% (Target: 25%)
+- Monthly Savings Target: $20,000
+
+ANOMALIES (Last 30 Days):
+- Total: {len(anomalies)} detected
+- Resolved: {len(resolved_anomalies)}
+- Top incidents: {', '.join([a['resource'] + ' (' + str(a['cost_impact']) + ')' for a in anomalies[:3]]) if anomalies else 'None'}
+
+BUDGETS:
+- Total budgets: {len(budgets_data)}
+- At risk (>80%): {len(critical_budgets)}
+- Budget details: {', '.join([b['name'] + ' (' + str(b.get('percentage', 0)) + '%)' for b in budgets_data]) if budgets_data else 'None'}
+
+GROWTH TRENDS:
+- 3P GPU: +97.6% MoM ($43K ACR)
+- AVD: +181% YoY ($410K ACR)
+- Azure AI: +199% YoY ($62K ACR)
+
+RI/SP RECOMMENDATIONS:
+- SQL Always On: 3-Year RI recommended (98% stability, $45K/yr savings)
+- AKS Production: 1-Year SP recommended (78% stability, growing workload)
+- GPU Training: Investigate (runaway cost detected)"""
+
+    # ALWAYS try GPT-5 first for ALL queries
+    gpt5_response = await call_gpt5_api(message.message, context)
+    
+    if gpt5_response:
+        return {"response": gpt5_response, "timestamp": datetime.utcnow().isoformat(), "source": "gpt5"}
+    
+    # Fallback to data-aware responses only if GPT-5 fails
+    print("GPT-5 API call failed, falling back to data-aware responses")
     
     # Data-aware responses based on actual database content
     if "anomal" in user_msg or "last month" in user_msg or "incident" in user_msg or "history" in user_msg:
@@ -1249,8 +1539,12 @@ Total AI-identified savings: $20,000/month"""
             resolved_count = len([a for a in anomalies if a['status'] == 'resolved'])
             total_count = len([a for a in anomalies if a['status'] != 'dismissed'])
             response = f"""HealthCo FinOps AI Assistant (GPT-5)
+        # Generic fallback for unmatched queries (GPT-5 already tried at start)
+        resolved_count = len([a for a in anomalies if a['status'] == 'resolved'])
+        total_count = len([a for a in anomalies if a['status'] != 'dismissed'])
+        response = f"""ContosoHealth FinOps AI Assistant
 
-I have access to your Azure subscription data and can answer questions about:
+I can help you with Azure cost management questions:
 
   - Anomalies: "Show me last month's anomalies" or "How was the GPU spike resolved?"
   - Budgets: "What's our budget status?" or "Which budgets are over 80%?"
@@ -1258,7 +1552,7 @@ I have access to your Azure subscription data and can answer questions about:
   - RI Coverage: "Explain RI coverage recommendations"
   - SQL/Database: "Why 3-year RI for SQL?"
 
-Quick Stats (December 2025 MBR):
+Quick Stats (December 2025):
   - Daily Rate: $19.6K (+22% YoY)
   - YTD ACR: $2.83M
   - Monthly Azure Cost: $588K
@@ -1268,7 +1562,7 @@ Quick Stats (December 2025 MBR):
 
 All recommendations are validated by secondary AI agents for accuracy."""
 
-    return {"response": response, "timestamp": datetime.utcnow().isoformat()}
+    return {"response": response, "timestamp": datetime.utcnow().isoformat(), "source": "fallback"}
 
 # Azure Configuration endpoints
 @app.get("/api/azure-config")
@@ -1287,10 +1581,42 @@ async def get_azure_config():
 
 @app.post("/api/azure-config")
 async def save_azure_config(config: AzureConfig):
+    global cost_service, recommendation_service, budget_service
+    
     azure_config_store["tenant_id"] = config.tenant_id
     azure_config_store["client_id"] = config.client_id
     azure_config_store["client_secret"] = config.client_secret
     azure_config_store["subscription_id"] = config.subscription_id
+    
+    # Try to initialize Azure services with the provided credentials
+    if AZURE_SERVICES_AVAILABLE:
+        try:
+            cost_service = CostService(
+                tenant_id=config.tenant_id,
+                client_id=config.client_id,
+                client_secret=config.client_secret,
+                subscription_id=config.subscription_id
+            )
+            recommendation_service = RecommendationService(
+                tenant_id=config.tenant_id,
+                client_id=config.client_id,
+                client_secret=config.client_secret,
+                subscription_id=config.subscription_id
+            )
+            budget_service = BudgetService(
+                tenant_id=config.tenant_id,
+                client_id=config.client_id,
+                client_secret=config.client_secret,
+                subscription_id=config.subscription_id
+            )
+            azure_config_store["services_initialized"] = True
+            print("Azure services initialized successfully from Settings UI")
+            return {"success": True, "message": "Azure configuration saved and services initialized"}
+        except Exception as e:
+            azure_config_store["services_initialized"] = False
+            print(f"Failed to initialize Azure services: {e}")
+            return {"success": True, "message": f"Configuration saved but service initialization failed: {str(e)}"}
+    
     return {"success": True, "message": "Azure configuration saved successfully"}
 
 @app.post("/api/azure-config/test")
@@ -1298,8 +1624,29 @@ async def test_azure_connection():
     if not azure_config_store.get("tenant_id"):
         return {"success": False, "message": "No Azure configuration found"}
     
-    # Simulated connection test - in production would use Azure SDK
-    await asyncio.sleep(1)  # Simulate API call
+    # Actually test the Azure connection using the stored credentials
+    if AZURE_SERVICES_AVAILABLE and azure_config_store.get("services_initialized"):
+        try:
+            # Try to make a simple API call to verify credentials
+            from .services.azure_client import AzureClientManager
+            test_client = AzureClientManager(
+                tenant_id=azure_config_store["tenant_id"],
+                client_id=azure_config_store["client_id"],
+                client_secret=azure_config_store["client_secret"],
+                subscription_id=azure_config_store["subscription_id"]
+            )
+            # Test by getting the credential token
+            test_client.credential.get_token("https://management.azure.com/.default")
+            return {
+                "success": True,
+                "message": "Successfully connected to Azure",
+                "subscription_id": azure_config_store["subscription_id"]
+            }
+        except Exception as e:
+            return {"success": False, "message": f"Connection failed: {str(e)}"}
+    
+    # Fallback for when Azure SDK not available
+    await asyncio.sleep(1)
     return {
         "success": True,
         "message": "Successfully connected to Azure",
@@ -1375,6 +1722,22 @@ circuit_breaker_settings = {
     "ai-token-overrun": {"enabled": True, "threshold": 2000000, "unit": "tokens/hr", "action": "fallback-model"}
 }
 
+# Discount settings - configurable EA, RI, and SP discount percentages
+discount_settings = {
+    "ea_discount": 12,  # Enterprise Agreement discount (default 12%)
+    "ri_1year_discount": 36,  # 1-Year Reserved Instance discount
+    "ri_3year_discount": 56,  # 3-Year Reserved Instance discount
+    "sp_1year_discount": 33,  # 1-Year Savings Plan discount
+    "sp_3year_discount": 52,  # 3-Year Savings Plan discount
+}
+
+# RI/SP Action tracking for Executive Summary
+risp_actions = {
+    "approved": [],  # List of approved recommendations
+    "held": [],      # List of held recommendations
+    "blocked": [],   # List of blocked recommendations
+}
+
 @app.get("/api/circuit-breakers")
 async def get_circuit_breakers():
     return circuit_breaker_settings
@@ -1385,6 +1748,63 @@ async def update_circuit_breaker(breaker_id: str, settings: dict):
         circuit_breaker_settings[breaker_id].update(settings)
         return {"success": True, "settings": circuit_breaker_settings[breaker_id]}
     return {"success": False, "message": f"Circuit breaker '{breaker_id}' not found"}
+
+# Discount settings endpoints
+@app.get("/api/discount-settings")
+async def get_discount_settings():
+    """Get current discount percentages for EA, RI, and SP."""
+    return discount_settings
+
+@app.put("/api/discount-settings")
+async def update_discount_settings(settings: dict):
+    """Update discount percentages. All values should be percentages (e.g., 12 for 12%)."""
+    for key in ["ea_discount", "ri_1year_discount", "ri_3year_discount", "sp_1year_discount", "sp_3year_discount"]:
+        if key in settings:
+            discount_settings[key] = float(settings[key])
+    return {"success": True, "settings": discount_settings}
+
+# RI/SP Action tracking endpoints
+@app.get("/api/risp-actions")
+async def get_risp_actions():
+    """Get RI/SP action summary for Executive Summary."""
+    return {
+        "approved_count": len(risp_actions["approved"]),
+        "held_count": len(risp_actions["held"]),
+        "blocked_count": len(risp_actions["blocked"]),
+        "approved": risp_actions["approved"],
+        "held": risp_actions["held"],
+        "blocked": risp_actions["blocked"],
+        "total_approved_savings": sum(r.get("savings", 0) for r in risp_actions["approved"]),
+    }
+
+@app.post("/api/risp-actions/{action}")
+async def record_risp_action(action: str, recommendation: dict):
+    """Record an RI/SP action (approve, hold, block)."""
+    if action not in ["approve", "hold", "block"]:
+        return {"success": False, "message": f"Invalid action: {action}"}
+    
+    action_map = {"approve": "approved", "hold": "held", "block": "blocked"}
+    action_list = action_map[action]
+    
+    # Add timestamp to the recommendation
+    recommendation["action_timestamp"] = datetime.utcnow().isoformat()
+    recommendation["action"] = action
+    
+    # Remove from other lists if exists
+    for lst in ["approved", "held", "blocked"]:
+        risp_actions[lst] = [r for r in risp_actions[lst] if r.get("resource") != recommendation.get("resource")]
+    
+    # Add to appropriate list
+    risp_actions[action_list].append(recommendation)
+    
+    return {"success": True, "action": action, "recommendation": recommendation}
+
+@app.delete("/api/risp-actions/{resource}")
+async def remove_risp_action(resource: str):
+    """Remove an RI/SP action by resource name."""
+    for lst in ["approved", "held", "blocked"]:
+        risp_actions[lst] = [r for r in risp_actions[lst] if r.get("resource") != resource]
+    return {"success": True, "message": f"Removed actions for {resource}"}
 
 
 # ============ LIVE AZURE DATA ENDPOINTS (Phase 1) ============
@@ -1472,6 +1892,21 @@ async def get_ri_coverage():
 @app.get("/api/azure/health")
 async def azure_health_check():
     """Check Azure connection health."""
+    # Check if using offline snapshot data
+    if offline_data_store["source"] == "imported":
+        return {
+            "cost_service": True,
+            "recommendation_service": True,
+            "budget_service": True,
+            "status": "snapshot",
+            "data_source": "SNAPSHOT",
+            "snapshot_date": offline_data_store["imported_at"],
+            "offline_counts": {
+                "ri_recommendations": len(offline_data_store["ri_recommendations"]),
+                "daily_costs": len(offline_data_store["daily_costs"]),
+                "budgets": len(offline_data_store["budgets"])
+            }
+        }
     return {
         "cost_service": cost_service is not None,
         "recommendation_service": recommendation_service is not None,
@@ -1679,3 +2114,1015 @@ async def trigger_job(job_id: str):
     job.modify(next_run_time=datetime.utcnow())
     
     return {"success": True, "message": f"Job {job_id} triggered"}
+
+
+# ============ OFFLINE DATA IMPORT ENDPOINTS ============
+
+@app.post("/api/offline/import")
+async def import_offline_data(data: OfflineDataImport):
+    """Import offline Azure data (RI recommendations, costs, budgets)."""
+    global offline_data_store
+    
+    imported_count = {
+        "ri_recommendations": 0,
+        "daily_costs": 0,
+        "budgets": 0
+    }
+    
+    if data.ri_recommendations:
+        offline_data_store["ri_recommendations"] = [r.dict() for r in data.ri_recommendations]
+        imported_count["ri_recommendations"] = len(data.ri_recommendations)
+    
+    if data.daily_costs:
+        offline_data_store["daily_costs"] = [c.dict() for c in data.daily_costs]
+        imported_count["daily_costs"] = len(data.daily_costs)
+    
+    if data.budgets:
+        offline_data_store["budgets"] = [b.dict() for b in data.budgets]
+        imported_count["budgets"] = len(data.budgets)
+    
+    offline_data_store["imported_at"] = datetime.utcnow().isoformat()
+    offline_data_store["source"] = "imported"
+    
+    return {
+        "success": True,
+        "message": "Data imported successfully",
+        "imported": imported_count,
+        "imported_at": offline_data_store["imported_at"]
+    }
+
+
+@app.get("/api/offline/status")
+async def get_offline_status():
+    """Get status of offline data import."""
+    return {
+        "source": offline_data_store["source"],
+        "imported_at": offline_data_store["imported_at"],
+        "counts": {
+            "ri_recommendations": len(offline_data_store["ri_recommendations"]),
+            "daily_costs": len(offline_data_store["daily_costs"]),
+            "budgets": len(offline_data_store["budgets"])
+        }
+    }
+
+
+@app.get("/api/offline/ri-recommendations")
+async def get_offline_ri_recommendations():
+    """Get imported RI/SP recommendations."""
+    if not offline_data_store["ri_recommendations"]:
+        return {
+            "recommendations": [],
+            "source": "none",
+            "message": "No RI recommendations imported. Use POST /api/offline/import to import data."
+        }
+    
+    # Calculate totals
+    total_monthly_savings = sum(r["monthly_savings"] for r in offline_data_store["ri_recommendations"])
+    total_annual_savings = sum(r["annual_savings"] for r in offline_data_store["ri_recommendations"])
+    
+    return {
+        "recommendations": offline_data_store["ri_recommendations"],
+        "summary": {
+            "total_recommendations": len(offline_data_store["ri_recommendations"]),
+            "total_monthly_savings": round(total_monthly_savings, 2),
+            "total_annual_savings": round(total_annual_savings, 2)
+        },
+        "source": "imported",
+        "imported_at": offline_data_store["imported_at"]
+    }
+
+
+@app.get("/api/offline/daily-costs")
+async def get_offline_daily_costs():
+    """Get imported daily costs."""
+    if not offline_data_store["daily_costs"]:
+        return {
+            "costs": [],
+            "source": "none",
+            "message": "No daily costs imported. Use POST /api/offline/import to import data."
+        }
+    
+    # Calculate totals
+    total_cost = sum(c["cost"] for c in offline_data_store["daily_costs"])
+    
+    return {
+        "costs": offline_data_store["daily_costs"],
+        "summary": {
+            "total_days": len(offline_data_store["daily_costs"]),
+            "total_cost": round(total_cost, 2),
+            "average_daily_cost": round(total_cost / len(offline_data_store["daily_costs"]), 2) if offline_data_store["daily_costs"] else 0
+        },
+        "source": "imported",
+        "imported_at": offline_data_store["imported_at"]
+    }
+
+
+@app.get("/api/offline/budgets")
+async def get_offline_budgets():
+    """Get imported budgets."""
+    if not offline_data_store["budgets"]:
+        return {
+            "budgets": [],
+            "source": "none",
+            "message": "No budgets imported. Use POST /api/offline/import to import data."
+        }
+    
+    # Calculate status for each budget
+    budgets_with_status = []
+    for b in offline_data_store["budgets"]:
+        spend_pct = (b["current_spend"] / b["amount"] * 100) if b["amount"] > 0 else 0
+        status = "ok" if spend_pct < 80 else "warning" if spend_pct < 100 else "critical"
+        budgets_with_status.append({
+            **b,
+            "spend_pct": round(spend_pct, 1),
+            "status": status
+        })
+    
+    return {
+        "budgets": budgets_with_status,
+        "summary": {
+            "total_budgets": len(budgets_with_status),
+            "healthy": sum(1 for b in budgets_with_status if b["status"] == "ok"),
+            "warning": sum(1 for b in budgets_with_status if b["status"] == "warning"),
+            "critical": sum(1 for b in budgets_with_status if b["status"] == "critical")
+        },
+        "source": "imported",
+        "imported_at": offline_data_store["imported_at"]
+    }
+
+
+@app.delete("/api/offline/clear")
+async def clear_offline_data():
+    """Clear all imported offline data."""
+    global offline_data_store
+    offline_data_store = {
+        "ri_recommendations": [],
+        "daily_costs": [],
+        "budgets": [],
+        "imported_at": None,
+        "source": "none"
+    }
+    return {"success": True, "message": "Offline data cleared"}
+
+
+# ============================================================================
+# Multi-Agent AI System for RI/SP Analysis
+# ============================================================================
+
+async def call_llm(model: str, system_prompt: str, user_prompt: str) -> dict:
+    """Generic LLM adapter supporting multiple Azure OpenAI models."""
+    model_configs = {
+        "gpt5": {"endpoint": GPT5_ENDPOINT, "key": GPT5_API_KEY, "name": "GPT-5"},
+        "o3": {"endpoint": O3_ENDPOINT, "key": O3_API_KEY, "name": "O3 (Reasoning)"},
+        "o4-mini": {"endpoint": O4_MINI_ENDPOINT, "key": O4_MINI_API_KEY, "name": "O4-Mini"},
+        "gpt41": {"endpoint": GPT41_ENDPOINT, "key": GPT41_API_KEY, "name": "GPT-4.1"},
+    }
+    
+    config = model_configs.get(model)
+    if not config or not config["endpoint"] or not config["key"]:
+        return {"success": False, "error": f"Model {model} not configured", "model": model}
+    
+    headers = {
+        "Content-Type": "application/json",
+        "api-key": config["key"],
+    }
+    
+    # Build payload - some models don't support temperature
+    payload = {
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_completion_tokens": 16000,
+        "stream": False,
+    }
+    # Only add temperature for models that support it (not GPT-5 or O3)
+    if model not in ["gpt5", "o3"]:
+        payload["temperature"] = 0.3
+    
+    async with httpx.AsyncClient(timeout=120) as client:
+        try:
+            print(f"{model} API call starting to {config['endpoint'][:50]}...")
+            r = await client.post(config["endpoint"], headers=headers, json=payload)
+            r.raise_for_status()
+            data = r.json()
+            print(f"{model} API response keys: {list(data.keys())}")
+            # Handle different response structures
+            content = ""
+            if "choices" in data and len(data["choices"]) > 0:
+                choice = data["choices"][0]
+                if "message" in choice and "content" in choice["message"]:
+                    content = choice["message"]["content"] or ""
+                elif "text" in choice:
+                    content = choice["text"] or ""
+            # For reasoning models, check for output field
+            if not content and "output" in data:
+                content = data["output"]
+            print(f"{model} API content length: {len(content)}")
+            if not content:
+                print(f"{model} API full response: {json.dumps(data)[:500]}")
+            return {"success": True, "content": content, "model": config["name"]}
+        except httpx.HTTPStatusError as e:
+            print(f"{model} API HTTP error: {e.response.status_code} - {e.response.text}")
+            return {"success": False, "error": f"HTTP {e.response.status_code}", "model": config["name"]}
+        except Exception as e:
+            print(f"{model} API error: {str(e)}")
+            return {"success": False, "error": str(e), "model": config["name"]}
+
+
+async def run_primary_analyzer(recommendations: list) -> dict:
+    """Run GPT-5 as primary RI/SP analyzer."""
+    recs_summary = json.dumps([{
+        "resource": r.get("resource", r.get("vm_name", "Unknown")),
+        "type": r.get("type", r.get("vm_size", "Unknown")),
+        "region": r.get("region", "Unknown"),
+        "current_cost": r.get("msrp", r.get("current_monthly_cost", 0)),
+        "recommended": r.get("recommendation", r.get("recommendation_type", "Unknown")),
+        "term": r.get("term", "Unknown"),
+        "monthly_savings": r.get("monthly_savings", 0),
+        "annual_savings": r.get("annual_savings", 0),
+    } for r in recommendations[:10]], indent=2)  # Limit to 10 for prompt size
+    
+    system_prompt = f"""You are the Primary RI/SP Analyzer for ContosoHealth Azure FinOps.
+
+{RI_SP_ANALYSIS_GUIDANCE}
+
+Your task is to analyze each RI/SP recommendation and provide:
+1. Whether RI or SP is the better choice
+2. Recommended term (1-year or 3-year)
+3. Confidence score (0-100)
+4. Risk level (LOW, MEDIUM, HIGH)
+5. Brief rationale
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "summary": "Brief portfolio-level summary",
+  "total_potential_savings": 0,
+  "recommendations": [
+    {{
+      "resource": "resource name",
+      "choice": "3-Year RI" or "1-Year RI" or "3-Year SP" or "1-Year SP",
+      "confidence": 85,
+      "risk_level": "LOW",
+      "rationale": "Brief explanation"
+    }}
+  ]
+}}"""
+
+    user_prompt = f"""Analyze these RI/SP recommendations for ContosoHealth:
+
+Current RI Coverage: 4%
+Target RI Coverage: 25%
+Monthly Azure Spend: $588K
+EA Discount: 12%
+
+Recommendations to analyze:
+{recs_summary}
+
+Provide your analysis as JSON."""
+
+    result = await call_llm("gpt5", system_prompt, user_prompt)
+    
+    if result["success"]:
+        try:
+            # Try to parse JSON from response
+            content = result["content"]
+            # Handle markdown code blocks
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0]
+            parsed = json.loads(content.strip())
+            return {"success": True, "model": result["model"], "analysis": parsed}
+        except json.JSONDecodeError as e:
+            return {"success": True, "model": result["model"], "analysis": {"raw_response": result["content"], "parse_error": str(e)}}
+    return result
+
+
+async def run_validation_agent(recommendations: list, primary_analysis: dict) -> dict:
+    """Run O3 (Large Reasoning Model) as validation agent."""
+    recs_summary = json.dumps([{
+        "resource": r.get("resource", r.get("vm_name", "Unknown")),
+        "type": r.get("type", r.get("vm_size", "Unknown")),
+        "recommended": r.get("recommendation", r.get("recommendation_type", "Unknown")),
+        "term": r.get("term", "Unknown"),
+        "monthly_savings": r.get("monthly_savings", 0),
+    } for r in recommendations[:10]], indent=2)
+    
+    primary_summary = json.dumps(primary_analysis.get("analysis", {}), indent=2)
+    
+    system_prompt = f"""You are the Validation Agent for ContosoHealth Azure FinOps using O3 Large Reasoning Model.
+
+{RI_SP_VALIDATION_GUIDANCE}
+
+Your task is to VALIDATE the Primary Analyzer's recommendations:
+1. Check each recommendation against the validation checklist
+2. Identify any red flags
+3. Provide your verdict: VALIDATED, ADJUSTED, FLAGGED, or REJECTED
+4. Adjust confidence scores if needed
+5. Note any concerns
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "validation_summary": "Brief validation summary",
+  "agreements": 0,
+  "disagreements": 0,
+  "flags": 0,
+  "recommendations": [
+    {{
+      "resource": "resource name",
+      "verdict": "VALIDATED",
+      "adjusted_confidence": 85,
+      "concerns": "Any concerns or empty string",
+      "proposed_change": "null or suggested change"
+    }}
+  ]
+}}"""
+
+    user_prompt = f"""Validate these RI/SP recommendations:
+
+Original Recommendations:
+{recs_summary}
+
+Primary Analyzer Output (GPT-5):
+{primary_summary}
+
+Validate each recommendation and provide your assessment as JSON."""
+
+    # Try O3 first, fallback to GPT-4.1 if O3 fails
+    result = await call_llm("o3", system_prompt, user_prompt)
+    
+    # If O3 fails, try GPT-4.1 as fallback validator
+    if not result["success"]:
+        print(f"O3 failed ({result.get('error')}), trying GPT-4.1 as fallback validator")
+        result = await call_llm("gpt41", system_prompt, user_prompt)
+    
+    if result["success"]:
+        try:
+            content = result["content"]
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0]
+            parsed = json.loads(content.strip())
+            return {"success": True, "model": result["model"], "validation": parsed}
+        except json.JSONDecodeError as e:
+            return {"success": True, "model": result["model"], "validation": {"raw_response": result["content"], "parse_error": str(e)}}
+    return result
+
+
+@app.get("/api/ai/ri-sp/analysis")
+async def get_ai_risp_analysis():
+    """Get AI-powered RI/SP analysis with multi-agent validation."""
+    global ai_analysis_cache
+    
+    # Check cache
+    current_snapshot = offline_data_store.get("imported_at")
+    if ai_analysis_cache["snapshot_date"] == current_snapshot and ai_analysis_cache["result"]:
+        return ai_analysis_cache["result"]
+    
+    # Get current recommendations
+    recommendations = []
+    if offline_data_store["source"] == "imported" and offline_data_store["ri_recommendations"]:
+        recommendations = offline_data_store["ri_recommendations"]
+    else:
+        # Use demo data
+        async with aiosqlite.connect(DATABASE) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute("SELECT * FROM vms WHERE recommendation IS NOT NULL LIMIT 10")
+            rows = await cursor.fetchall()
+            recommendations = [dict(row) for row in rows]
+    
+    if not recommendations:
+        return {
+            "success": False,
+            "error": "No recommendations available for analysis",
+            "data_source": "none"
+        }
+    
+    # Run primary analyzer (GPT-5)
+    primary_result = await run_primary_analyzer(recommendations)
+    
+    # Run validation agent (O3)
+    validation_result = await run_validation_agent(recommendations, primary_result)
+    
+    # Combine results
+    result = {
+        "success": True,
+        "snapshot_date": current_snapshot or datetime.now().isoformat(),
+        "data_source": offline_data_store["source"] if offline_data_store["source"] != "none" else "demo",
+        "guidance": {
+            "analysis_guidance": RI_SP_ANALYSIS_GUIDANCE,
+            "validation_guidance": RI_SP_VALIDATION_GUIDANCE
+        },
+        "primary_agent": {
+            "model": primary_result.get("model", "GPT-5"),
+            "status": "success" if primary_result.get("success") else "failed",
+            "analysis": primary_result.get("analysis", primary_result.get("error", "No analysis"))
+        },
+        "validator_agent": {
+            "model": validation_result.get("model", "O3"),
+            "status": "success" if validation_result.get("success") else "failed",
+            "validation": validation_result.get("validation", validation_result.get("error", "No validation"))
+        },
+        "agents_used": [
+            {"name": "GPT-5", "role": "Primary Analyzer", "status": "active" if primary_result.get("success") else "failed"},
+            {"name": "O3", "role": "Validation Agent", "status": "active" if validation_result.get("success") else "failed"}
+        ]
+    }
+    
+    # Cache result
+    ai_analysis_cache = {
+        "snapshot_date": current_snapshot,
+        "result": result
+    }
+    
+    return result
+
+
+@app.post("/api/ai/ri-sp/refresh")
+async def refresh_ai_analysis():
+    """Force refresh AI analysis (clears cache and re-runs agents)."""
+    global ai_analysis_cache
+    ai_analysis_cache = {"snapshot_date": None, "result": None}
+    return await get_ai_risp_analysis()
+
+
+@app.get("/api/ai/guidance")
+async def get_ai_guidance():
+    """Get the RI/SP analysis and validation guidance documents."""
+    return {
+        "analysis_guidance": RI_SP_ANALYSIS_GUIDANCE,
+        "validation_guidance": RI_SP_VALIDATION_GUIDANCE,
+        "models_available": {
+            "gpt5": bool(GPT5_ENDPOINT and GPT5_API_KEY),
+            "o3": bool(O3_ENDPOINT and O3_API_KEY),
+            "o4_mini": bool(O4_MINI_ENDPOINT and O4_MINI_API_KEY),
+            "gpt41": bool(GPT41_ENDPOINT and GPT41_API_KEY)
+        }
+    }
+
+
+@app.get("/api/ai/agents/status")
+async def get_ai_agents_status():
+    """Get status of all AI agents."""
+    return {
+        "agents": [
+            {
+                "name": "GPT-5",
+                "role": "Primary RI/SP Analyzer",
+                "model_type": "Large Language Model",
+                "configured": bool(GPT5_ENDPOINT and GPT5_API_KEY),
+                "description": "Analyzes workload patterns and recommends RI vs SP based on stability, growth, and cost factors"
+            },
+            {
+                "name": "O3",
+                "role": "Validation Agent",
+                "model_type": "Large Reasoning Model",
+                "configured": bool(O3_ENDPOINT and O3_API_KEY),
+                "description": "Cross-validates recommendations, identifies risks, and flags items needing human review"
+            },
+            {
+                "name": "O4-Mini",
+                "role": "Secondary Validator",
+                "model_type": "Reasoning Model (Compact)",
+                "configured": bool(O4_MINI_ENDPOINT and O4_MINI_API_KEY),
+                "description": "Fast secondary validation for quick checks and ensemble voting"
+            },
+            {
+                "name": "GPT-4.1",
+                "role": "Alternative Analyzer",
+                "model_type": "Large Language Model",
+                "configured": bool(GPT41_ENDPOINT and GPT41_API_KEY),
+                "description": "Alternative analysis perspective for diverse model ensemble"
+            }
+        ],
+        "active_agents": sum([
+            bool(GPT5_ENDPOINT and GPT5_API_KEY),
+            bool(O3_ENDPOINT and O3_API_KEY),
+            bool(O4_MINI_ENDPOINT and O4_MINI_API_KEY),
+            bool(GPT41_ENDPOINT and GPT41_API_KEY)
+        ])
+    }
+
+
+# ============================================================================
+# PHASE 3: WORKLOAD INTELLIGENCE LAYER
+# ============================================================================
+
+# Phase 3 imports
+try:
+    from fastapi import UploadFile, File, Form
+    from app.services.intelligence_service import IntelligenceService
+    from app.services.document_service import DocumentService
+    from app.models.workload_intelligence import (
+        Workload, TechnologyEvaluation, WorkloadContext,
+        WorkloadStatus, EvaluationStatus, CommitmentAction
+    )
+    
+    intelligence_service = IntelligenceService()
+    document_service = DocumentService()
+    PHASE3_AVAILABLE = True
+    print("Phase 3 Workload Intelligence Layer loaded successfully")
+except ImportError as e:
+    PHASE3_AVAILABLE = False
+    intelligence_service = None
+    document_service = None
+    print(f"Phase 3 features not available: {e}")
+
+
+# ============ SMART RECOMMENDATIONS ============
+
+@app.get("/api/recommendations/smart")
+async def get_smart_recommendations():
+    """Get recommendations enriched with workload intelligence."""
+    if not PHASE3_AVAILABLE:
+        return {"error": "Phase 3 not available", "approved": [], "modified": [], "hold": [], "blocked": [], "summary": {}}
+    return intelligence_service.get_smart_recommendations()
+
+
+@app.get("/api/recommendations/{rec_id}/details")
+async def get_recommendation_details(rec_id: str):
+    """Get full details for a single recommendation (for drawer)."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    smart_recs = intelligence_service.get_smart_recommendations()
+    
+    for category in ["approved", "modified", "hold", "blocked"]:
+        for rec in smart_recs.get(category, []):
+            if rec.get("id") == rec_id:
+                return rec
+    
+    raise HTTPException(404, "Recommendation not found")
+
+
+# ============ WORKLOAD REGISTRY ============
+
+@app.get("/api/workloads")
+async def list_workloads():
+    """List all registered workloads."""
+    if not PHASE3_AVAILABLE:
+        return {"workloads": []}
+    
+    with get_db() as db:
+        workloads = db.query(Workload).all()
+        return {
+            "workloads": [
+                {
+                    "id": w.id,
+                    "name": w.name,
+                    "description": w.description,
+                    "status": w.status.value if w.status else None,
+                    "criticality": w.criticality,
+                    "owner_name": w.owner_name,
+                    "owner_email": w.owner_email,
+                    "expected_end_date": w.expected_end_date.isoformat() if w.expected_end_date else None,
+                    "resource_group_patterns": w.resource_group_patterns,
+                    "subscription_ids": w.subscription_ids,
+                    "max_commitment_term_months": w.max_commitment_term_months,
+                    "migration_target": w.migration_target,
+                    "created_at": w.created_at.isoformat() if w.created_at else None
+                }
+                for w in workloads
+            ]
+        }
+
+
+@app.post("/api/workloads")
+async def create_workload(
+    name: str = Form(...),
+    description: str = Form(None),
+    owner_name: str = Form(None),
+    owner_email: str = Form(None),
+    status: str = Form("active"),
+    criticality: str = Form("standard"),
+    resource_group_patterns: str = Form(None),
+    subscription_ids: str = Form(None),
+    max_commitment_term_months: int = Form(None),
+    migration_target: str = Form(None),
+    expected_end_date: str = Form(None),
+    created_by: str = Form("system")
+):
+    """Create a new workload."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    from datetime import date
+    
+    with get_db() as db:
+        workload = Workload(
+            name=name,
+            description=description,
+            owner_name=owner_name,
+            owner_email=owner_email,
+            status=WorkloadStatus(status) if status else WorkloadStatus.ACTIVE,
+            criticality=criticality,
+            resource_group_patterns=json.loads(resource_group_patterns) if resource_group_patterns else None,
+            subscription_ids=json.loads(subscription_ids) if subscription_ids else None,
+            max_commitment_term_months=max_commitment_term_months,
+            migration_target=migration_target,
+            expected_end_date=date.fromisoformat(expected_end_date) if expected_end_date else None,
+            created_by=created_by
+        )
+        db.add(workload)
+        db.commit()
+        db.refresh(workload)
+        
+        return {
+            "id": workload.id,
+            "name": workload.name,
+            "status": workload.status.value if workload.status else None,
+            "message": "Workload created successfully"
+        }
+
+
+@app.get("/api/workloads/{workload_id}")
+async def get_workload(workload_id: int):
+    """Get a single workload by ID."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    with get_db() as db:
+        workload = db.query(Workload).filter(Workload.id == workload_id).first()
+        if not workload:
+            raise HTTPException(404, "Workload not found")
+        
+        return {
+            "id": workload.id,
+            "name": workload.name,
+            "description": workload.description,
+            "status": workload.status.value if workload.status else None,
+            "criticality": workload.criticality,
+            "owner_name": workload.owner_name,
+            "owner_email": workload.owner_email,
+            "expected_end_date": workload.expected_end_date.isoformat() if workload.expected_end_date else None,
+            "resource_group_patterns": workload.resource_group_patterns,
+            "subscription_ids": workload.subscription_ids,
+            "max_commitment_term_months": workload.max_commitment_term_months,
+            "migration_target": workload.migration_target
+        }
+
+
+# ============ TECHNOLOGY EVALUATIONS ============
+
+@app.get("/api/evaluations")
+async def list_evaluations():
+    """List all technology evaluations."""
+    if not PHASE3_AVAILABLE:
+        return {"evaluations": []}
+    
+    with get_db() as db:
+        evaluations = db.query(TechnologyEvaluation).all()
+        return {
+            "evaluations": [
+                {
+                    "id": e.id,
+                    "workload_id": e.workload_id,
+                    "name": e.name,
+                    "vendor": e.vendor,
+                    "evaluation_type": e.evaluation_type,
+                    "status": e.status.value if e.status else None,
+                    "started_date": e.started_date.isoformat() if e.started_date else None,
+                    "decision_date": e.decision_date.isoformat() if e.decision_date else None,
+                    "adoption_probability_pct": e.adoption_probability_pct,
+                    "poc_success_score": e.poc_success_score,
+                    "executive_sponsor": e.executive_sponsor,
+                    "hold_commitments": e.hold_commitments,
+                    "hold_expires": e.hold_expires.isoformat() if e.hold_expires else None,
+                    "affected_azure_services": e.affected_azure_services,
+                    "estimated_monthly_spend_affected": e.estimated_monthly_spend_affected
+                }
+                for e in evaluations
+            ]
+        }
+
+
+@app.post("/api/evaluations")
+async def create_evaluation(
+    workload_id: int = Form(...),
+    name: str = Form(...),
+    vendor: str = Form(...),
+    evaluation_type: str = Form("saas_replacement"),
+    status: str = Form("evaluating"),
+    decision_date: str = Form(None),
+    adoption_probability_pct: int = Form(50),
+    poc_success_score: int = Form(None),
+    poc_notes: str = Form(None),
+    executive_sponsor: str = Form(None),
+    hold_commitments: bool = Form(True),
+    hold_expires: str = Form(None),
+    affected_azure_services: str = Form(None),
+    estimated_monthly_spend_affected: float = Form(None),
+    created_by: str = Form("system")
+):
+    """Create a new technology evaluation."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    from datetime import date
+    
+    with get_db() as db:
+        evaluation = TechnologyEvaluation(
+            workload_id=workload_id,
+            name=name,
+            vendor=vendor,
+            evaluation_type=evaluation_type,
+            status=EvaluationStatus(status) if status else EvaluationStatus.EVALUATING,
+            started_date=date.today(),
+            decision_date=date.fromisoformat(decision_date) if decision_date else None,
+            adoption_probability_pct=adoption_probability_pct,
+            poc_success_score=poc_success_score,
+            poc_notes=poc_notes,
+            executive_sponsor=executive_sponsor,
+            hold_commitments=hold_commitments,
+            hold_expires=date.fromisoformat(hold_expires) if hold_expires else None,
+            affected_azure_services=json.loads(affected_azure_services) if affected_azure_services else None,
+            estimated_monthly_spend_affected=estimated_monthly_spend_affected,
+            created_by=created_by
+        )
+        db.add(evaluation)
+        db.commit()
+        db.refresh(evaluation)
+        
+        return {
+            "id": evaluation.id,
+            "name": evaluation.name,
+            "status": evaluation.status.value if evaluation.status else None,
+            "message": "Evaluation created successfully"
+        }
+
+
+@app.get("/api/evaluations/{evaluation_id}")
+async def get_evaluation(evaluation_id: int):
+    """Get a single evaluation by ID."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    with get_db() as db:
+        evaluation = db.query(TechnologyEvaluation).filter(
+            TechnologyEvaluation.id == evaluation_id
+        ).first()
+        
+        if not evaluation:
+            raise HTTPException(404, "Evaluation not found")
+        
+        return {
+            "id": evaluation.id,
+            "workload_id": evaluation.workload_id,
+            "name": evaluation.name,
+            "vendor": evaluation.vendor,
+            "evaluation_type": evaluation.evaluation_type,
+            "status": evaluation.status.value if evaluation.status else None,
+            "started_date": evaluation.started_date.isoformat() if evaluation.started_date else None,
+            "decision_date": evaluation.decision_date.isoformat() if evaluation.decision_date else None,
+            "adoption_probability_pct": evaluation.adoption_probability_pct,
+            "poc_success_score": evaluation.poc_success_score,
+            "poc_notes": evaluation.poc_notes,
+            "executive_sponsor": evaluation.executive_sponsor,
+            "hold_commitments": evaluation.hold_commitments,
+            "hold_expires": evaluation.hold_expires.isoformat() if evaluation.hold_expires else None,
+            "affected_azure_services": evaluation.affected_azure_services,
+            "estimated_monthly_spend_affected": evaluation.estimated_monthly_spend_affected
+        }
+
+
+# ============ AI ANALYSIS ============
+
+class ReEvaluationRequest(BaseModel):
+    """Request body for re-evaluation with context about what changed."""
+    previous_analysis_id: Optional[int] = None
+    trigger: str = "manual"  # "new_document", "new_context", "status_change", "manual", "decision_date_passed"
+    focus_areas: Optional[List[str]] = None  # ["security_review", "timeline", "executive_support", "budget", "poc_metrics"]
+
+
+@app.post("/api/evaluations/{evaluation_id}/analyze")
+async def run_evaluation_analysis(
+    evaluation_id: int,
+    request: Optional[ReEvaluationRequest] = None
+):
+    """Run SaaS evaluator AI agent on an evaluation.
+    
+    For re-evaluations, include request body with:
+    - previous_analysis_id: ID of previous analysis to compare against
+    - trigger: What triggered this analysis (new_document, new_context, status_change, manual)
+    - focus_areas: Areas to focus on (security_review, timeline, executive_support, budget, poc_metrics)
+    """
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    try:
+        # Extract re-evaluation parameters if provided
+        trigger = request.trigger if request else "manual"
+        focus_areas = request.focus_areas if request else None
+        previous_analysis_id = request.previous_analysis_id if request else None
+        
+        result = intelligence_service.run_analysis(
+            evaluation_id,
+            trigger=trigger,
+            focus_areas=focus_areas,
+            previous_analysis_id=previous_analysis_id
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Analysis failed: {str(e)}")
+
+
+@app.get("/api/intelligence/status")
+async def get_intelligence_status():
+    """Get status of the intelligence layer including RL integration."""
+    if not PHASE3_AVAILABLE:
+        return {"phase3_available": False, "agent_lightning_available": False}
+    
+    return {
+        "phase3_available": True,
+        **intelligence_service.get_agent_status()
+    }
+
+
+# ============ DOCUMENT UPLOADS ============
+
+@app.post("/api/evaluations/{evaluation_id}/documents")
+async def upload_evaluation_document(
+    evaluation_id: int,
+    file: UploadFile = File(...),
+    document_type: str = Form("proposal"),
+    uploaded_by: str = Form("system")
+):
+    """Upload a document for an evaluation."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    try:
+        doc = await document_service.upload_evaluation_document(
+            evaluation_id=evaluation_id,
+            file=file.file,
+            filename=file.filename,
+            document_type=document_type,
+            uploaded_by=uploaded_by
+        )
+        return {
+            "id": doc.id,
+            "filename": doc.original_filename,
+            "file_type": doc.file_type,
+            "file_size_bytes": doc.file_size_bytes,
+            "extraction_status": "completed" if doc.extracted_text else "failed",
+            "message": "Document uploaded successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Upload failed: {str(e)}")
+
+
+@app.post("/api/workloads/{workload_id}/documents")
+async def upload_workload_document(
+    workload_id: int,
+    file: UploadFile = File(...),
+    uploaded_by: str = Form("system")
+):
+    """Upload a document for a workload."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    try:
+        doc = await document_service.upload_workload_document(
+            workload_id=workload_id,
+            file=file.file,
+            filename=file.filename,
+            uploaded_by=uploaded_by
+        )
+        return {
+            "id": doc.id,
+            "filename": doc.original_filename,
+            "file_type": doc.file_type,
+            "file_size_bytes": doc.file_size_bytes,
+            "extraction_status": doc.extraction_status,
+            "message": "Document uploaded successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Upload failed: {str(e)}")
+
+
+# ============ WORKLOAD CONTEXT ============
+
+@app.post("/api/workloads/{workload_id}/context")
+async def add_workload_context(
+    workload_id: int,
+    content: str = Form(...),
+    added_by: str = Form("system")
+):
+    """Add context note to a workload."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    with get_db() as db:
+        context = WorkloadContext(
+            workload_id=workload_id,
+            content=content,
+            added_by=added_by
+        )
+        db.add(context)
+        db.commit()
+        db.refresh(context)
+        
+        return {
+            "id": context.id,
+            "content": context.content,
+            "added_at": context.added_at.isoformat() if context.added_at else None,
+            "message": "Context added successfully"
+        }
+
+
+@app.get("/api/workloads/{workload_id}/context")
+async def get_workload_context(workload_id: int):
+    """Get all context notes for a workload."""
+    if not PHASE3_AVAILABLE:
+        return {"context": []}
+    
+    with get_db() as db:
+        contexts = db.query(WorkloadContext).filter(
+            WorkloadContext.workload_id == workload_id
+        ).order_by(WorkloadContext.added_at.desc()).all()
+        
+        return {
+            "context": [
+                {
+                    "id": c.id,
+                    "content": c.content,
+                    "added_by": c.added_by,
+                    "added_at": c.added_at.isoformat() if c.added_at else None
+                }
+                for c in contexts
+            ]
+        }
+
+
+# ============ MANUAL OVERRIDES ============
+
+@app.post("/api/recommendations/{rec_id}/override")
+async def set_recommendation_override(
+    rec_id: str,
+    action: str = Form(...),
+    reason: str = Form(...),
+    override_by: str = Form("system"),
+    expires_date: str = Form(None)
+):
+    """Set a manual override for a recommendation."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    from datetime import date
+    
+    if action not in ["approve", "modify", "hold", "block"]:
+        raise HTTPException(400, f"Invalid action: {action}. Must be one of: approve, modify, hold, block")
+    
+    try:
+        intel = intelligence_service.set_override(
+            recommendation_id=rec_id,
+            action=action,
+            reason=reason,
+            override_by=override_by,
+            expires_date=date.fromisoformat(expires_date) if expires_date else None
+        )
+        return {
+            "id": intel.id,
+            "azure_recommendation_id": intel.azure_recommendation_id,
+            "override_action": intel.override_action.value if intel.override_action else None,
+            "override_reason": intel.override_reason,
+            "override_by": intel.override_by,
+            "override_expires": intel.override_expires.isoformat() if intel.override_expires else None,
+            "message": "Override set successfully"
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Failed to set override: {str(e)}")
+
+
+# ============ RL FEEDBACK ============
+
+@app.post("/api/analysis/{analysis_id}/feedback")
+async def provide_analysis_feedback(
+    analysis_id: int,
+    feedback: str = Form(...),
+    reward: float = Form(...)
+):
+    """Provide feedback on an AI analysis for RL training."""
+    if not PHASE3_AVAILABLE:
+        raise HTTPException(503, "Phase 3 not available")
+    
+    if reward < -1 or reward > 1:
+        raise HTTPException(400, "Reward must be between -1 and 1")
+    
+    try:
+        result = intelligence_service.saas_agent.provide_feedback(
+            analysis_id=analysis_id,
+            feedback=feedback,
+            reward=reward
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Failed to record feedback: {str(e)}")

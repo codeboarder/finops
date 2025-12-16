@@ -3,14 +3,15 @@ Service for fetching RI/SP recommendations from Azure Advisor and Consumption AP
 """
 from datetime import datetime
 from typing import Dict, List, Any, Optional
-from .azure_client import get_azure_manager
+from .azure_client import AzureClientManager
 
 
 class RecommendationService:
     """Fetches reservation and savings plan recommendations from Azure."""
     
-    def __init__(self):
-        self.azure = get_azure_manager()
+    def __init__(self, tenant_id: str = None, client_id: str = None,
+                 client_secret: str = None, subscription_id: str = None):
+        self.azure = AzureClientManager(tenant_id, client_id, client_secret, subscription_id)
         self.scope = f"/subscriptions/{self.azure.subscription_id}"
     
     def get_reservation_recommendations(self) -> List[Dict[str, Any]]:
