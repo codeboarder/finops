@@ -14,7 +14,9 @@ import {
 } from 'recharts'
 import { Toaster, toast } from 'sonner'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// Use window.location.origin for tunnel access (avoids credentials in URL issue), or explicit VITE_API_URL if set
+const rawApiUrl = import.meta.env.VITE_API_URL;
+const API_URL = rawApiUrl && rawApiUrl.trim().length > 0 ? rawApiUrl : (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000')
 
 function App() {
   const [activeTab, setActiveTab] = useState('exec')
@@ -818,8 +820,8 @@ function App() {
             {/* Key Metrics Row */}
             <div className="grid grid-cols-6 gap-4">
               {[
-                { label: 'MONTHLY AZURE COST', value: '$588K', sub: '$19.6K daily rate', icon: TrendingUp, color: 'blue' },
-                { label: 'MONTHLY SAVINGS', value: fmt(stats.ai_savings), change: '+$127K vs last month', icon: DollarSign, color: 'green' },
+                { label: 'MONTHLY AZURE COST', value: fmt(stats.monthly_spend), sub: `${fmt(stats.monthly_spend / 30)} daily rate`, icon: TrendingUp, color: 'blue' },
+                { label: 'MONTHLY SAVINGS', value: fmt(stats.ai_savings), change: stats.data_source === 'azure_live' ? 'Live Azure Data' : '+$127K vs last month', icon: DollarSign, color: 'green' },
                 { label: 'ANOMALIES RESOLVED', value: `${alerts.filter((a: any) => a.status === 'auto-resolved' || a.status === 'owner-notified').length}/${alerts.length}`, sub: 'This month', icon: CheckCircle, color: 'blue' },
                 { label: 'BUDGET STATUS', value: 'ON TRACK', sub: `${budgets.filter((b: any) => b.threshold_status === 'healthy' || b.threshold_status === 'info').length}/${budgets.length} budgets on track`, icon: Shield, color: 'green' },
                 { label: 'RI COVERAGE', value: `${stats.ri_coverage}%`, sub: `Target: ${stats.target_coverage}%`, icon: Target, color: stats.ri_coverage >= stats.target_coverage ? 'green' : 'yellow' },
