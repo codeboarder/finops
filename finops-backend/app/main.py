@@ -800,7 +800,7 @@ async def get_stats():
                 "ai_savings": round(monthly_spend * 0.03, 2),  # Estimate 3% savings potential
                 "hidden_costs_found": round(monthly_spend * 0.02, 2),  # Estimate 2% hidden costs
                 "hidden_costs_mitigated": 0,
-                "ri_coverage": 4,  # Would need Azure Reservations API
+                "ri_coverage": 0,  # No RIs configured - would need Azure Reservations API
                 "sp_coverage": 0,
                 "target_coverage": 25,
                 "ri_savings_potential": round(monthly_spend * 0.15, 2),  # 15% potential with RI/SP

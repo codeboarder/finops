@@ -251,9 +251,10 @@ function App() {
     const d = setInterval(fetchData, 30000)
     const t = setInterval(simulateTick, 3000)
     const c = setInterval(() => setCurrentTime(new Date()), 1000)
-    const a = setTimeout(generateDemoAlert, 5000)
-    const alertInterval = setInterval(generateDemoAlert, 60000) // Generate alert every 60 seconds
-    return () => { clearInterval(d); clearInterval(t); clearInterval(c); clearTimeout(a); clearInterval(alertInterval) }
+    // Disable demo alerts - they're distracting and not real data
+    // const a = setTimeout(generateDemoAlert, 5000)
+    // const alertInterval = setInterval(generateDemoAlert, 60000)
+    return () => { clearInterval(d); clearInterval(t); clearInterval(c) }
   }, [fetchData, simulateTick])
 
   const openAlertWorkflow = (alert: any) => {
@@ -847,6 +848,7 @@ function App() {
                 <div className="flex items-center gap-3 mb-4">
                   <Activity className="w-5 h-5 text-orange-400" />
                   <h3 className="font-semibold text-white">Anomaly Resolution Timeline</h3>
+                  {stats?.data_source === 'azure_live' && <span className="px-2 py-0.5 rounded text-xs bg-yellow-500/20 text-yellow-400">DEMO</span>}
                 </div>
                 <div className="space-y-3 max-h-80 overflow-y-auto">
                   {alerts.slice(0, 8).map((alert: any, i: number) => (
@@ -872,6 +874,7 @@ function App() {
                 <div className="flex items-center gap-3 mb-4">
                   <Shield className="w-5 h-5 text-blue-400" />
                   <h3 className="font-semibold text-white">Budget Guardrails</h3>
+                  {stats?.data_source === 'azure_live' && <span className="px-2 py-0.5 rounded text-xs bg-yellow-500/20 text-yellow-400">DEMO</span>}
                 </div>
                 <div className="space-y-3">
                   {budgets.map((budget: any, i: number) => (
