@@ -10,6 +10,7 @@ from azure.identity import ClientSecretCredential
 from azure.mgmt.costmanagement import CostManagementClient
 from azure.mgmt.advisor import AdvisorManagementClient
 from azure.mgmt.consumption import ConsumptionManagementClient
+from azure.mgmt.resource import ResourceManagementClient
 
 
 class AzureClientManager:
@@ -30,6 +31,7 @@ class AzureClientManager:
         self._cost_client = None
         self._advisor_client = None
         self._consumption_client = None
+        self._resource_client = None
     
     @property
     def credential(self) -> ClientSecretCredential:
@@ -67,6 +69,51 @@ class AzureClientManager:
                 subscription_id=self.subscription_id
             )
         return self._consumption_client
+    
+    @property
+    def resource_client(self) -> ResourceManagementClient:
+        if self._resource_client is None:
+            self._resource_client = ResourceManagementClient(
+                credential=self.credential,
+                subscription_id=self.subscription_id
+            )
+        return self._resource_client
+    
+    def list_resources(self) -> dict:
+        """List all resources in the subscription and categorize them."""
+        resources = list(self.resource_client.resources.list())
+        
+        # Categorize resources by type
+        categories = {
+            "virtual_machines": 0,
+            "sql_databases": 0,
+            "storage_accounts": 0,
+            "kubernetes_clusters": 0,
+            "app_services": 0,
+            "networking": 0,
+            "other": 0
+        }
+        
+        for resource in resources:
+            resource_type = resource.type.lower() if resource.type else ""
+            
+            if "virtualmachines" in resource_type:
+                categories["virtual_machines"] += 1
+            elif "sql" in resource_type or "database" in resource_type:
+                categories["sql_databases"] += 1
+            elif "storageaccounts" in resource_type:
+                categories["storage_accounts"] += 1
+            elif "kubernetes" in resource_type or "containerservice" in resource_type:
+                categories["kubernetes_clusters"] += 1
+            elif "sites" in resource_type or "appservice" in resource_type:
+                categories["app_services"] += 1
+            elif "network" in resource_type or "virtualnetwork" in resource_type or "publicip" in resource_type:
+                categories["networking"] += 1
+            else:
+                categories["other"] += 1
+        
+        categories["total"] = len(resources)
+        return categories
 
 
 # Singleton instance

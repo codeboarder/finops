@@ -14,7 +14,9 @@ import {
 } from 'recharts'
 import { Toaster, toast } from 'sonner'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// Use window.location.origin for tunnel access (avoids credentials in URL issue), or explicit VITE_API_URL if set
+const rawApiUrl = import.meta.env.VITE_API_URL;
+const API_URL = rawApiUrl && rawApiUrl.trim().length > 0 ? rawApiUrl : (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8000')
 
 function App() {
   const [activeTab, setActiveTab] = useState('exec')
@@ -249,9 +251,10 @@ function App() {
     const d = setInterval(fetchData, 30000)
     const t = setInterval(simulateTick, 3000)
     const c = setInterval(() => setCurrentTime(new Date()), 1000)
-    const a = setTimeout(generateDemoAlert, 5000)
-    const alertInterval = setInterval(generateDemoAlert, 60000) // Generate alert every 60 seconds
-    return () => { clearInterval(d); clearInterval(t); clearInterval(c); clearTimeout(a); clearInterval(alertInterval) }
+    // Disable demo alerts - they're distracting and not real data
+    // const a = setTimeout(generateDemoAlert, 5000)
+    // const alertInterval = setInterval(generateDemoAlert, 60000)
+    return () => { clearInterval(d); clearInterval(t); clearInterval(c) }
   }, [fetchData, simulateTick])
 
   const openAlertWorkflow = (alert: any) => {
@@ -818,12 +821,12 @@ function App() {
             {/* Key Metrics Row */}
             <div className="grid grid-cols-6 gap-4">
               {[
-                { label: 'MONTHLY AZURE COST', value: '$588K', sub: '$19.6K daily rate', icon: TrendingUp, color: 'blue' },
-                { label: 'MONTHLY SAVINGS', value: fmt(stats.ai_savings), change: '+$127K vs last month', icon: DollarSign, color: 'green' },
-                { label: 'ANOMALIES RESOLVED', value: `${alerts.filter((a: any) => a.status === 'auto-resolved' || a.status === 'owner-notified').length}/${alerts.length}`, sub: 'This month', icon: CheckCircle, color: 'blue' },
-                { label: 'BUDGET STATUS', value: 'ON TRACK', sub: `${budgets.filter((b: any) => b.threshold_status === 'healthy' || b.threshold_status === 'info').length}/${budgets.length} budgets on track`, icon: Shield, color: 'green' },
+                { label: 'MONTHLY AZURE COST', value: fmt(stats.monthly_spend), sub: `${fmt(stats.monthly_spend / 30)} daily rate`, icon: TrendingUp, color: 'blue' },
+                { label: 'MONTHLY SAVINGS', value: fmt(stats.ai_savings), change: stats.data_source === 'azure_live' ? 'Live Azure Data' : '+$127K vs last month', icon: DollarSign, color: 'green' },
+                                { label: 'ANOMALIES RESOLVED', value: stats?.data_source === 'azure_live' ? 'N/A' : `${alerts.filter((a: any) => a.status === 'auto-resolved' || a.status === 'owner-notified').length}/${alerts.length}`, sub: stats?.data_source === 'azure_live' ? 'No anomaly data' : 'This month', icon: CheckCircle, color: 'blue' },
+                                { label: 'BUDGET STATUS', value: stats?.data_source === 'azure_live' ? 'N/A' : 'ON TRACK', sub: stats?.data_source === 'azure_live' ? 'No budget data' : `${budgets.filter((b: any) => b.threshold_status === 'healthy' || b.threshold_status === 'info').length}/${budgets.length} budgets on track`, icon: Shield, color: 'green' },
                 { label: 'RI COVERAGE', value: `${stats.ri_coverage}%`, sub: `Target: ${stats.target_coverage}%`, icon: Target, color: stats.ri_coverage >= stats.target_coverage ? 'green' : 'yellow' },
-                { label: 'AGENT SAVINGS', value: fmt(agents.reduce((sum: number, a: any) => sum + (a.savings_identified || 0), 0)), sub: `${agents.length} agents active`, icon: Bot, color: 'purple' },
+                { label: 'AGENT SAVINGS', value: stats?.data_source === 'azure_live' ? fmt(stats.ai_savings || 0) : fmt(agents.reduce((sum: number, a: any) => sum + (a.savings_identified || 0), 0)), sub: stats?.data_source === 'azure_live' ? 'From Azure recommendations' : `${agents.length} agents active`, icon: Bot, color: 'purple' },
               ].map((s, i) => (
                 <div key={i} className={`rounded-xl border p-5 bg-slate-900 border-slate-800`}>
                   <div className="flex items-center justify-between mb-2">
@@ -845,6 +848,7 @@ function App() {
                 <div className="flex items-center gap-3 mb-4">
                   <Activity className="w-5 h-5 text-orange-400" />
                   <h3 className="font-semibold text-white">Anomaly Resolution Timeline</h3>
+                  {stats?.data_source === 'azure_live' && <span className="px-2 py-0.5 rounded text-xs bg-yellow-500/20 text-yellow-400">DEMO</span>}
                 </div>
                 <div className="space-y-3 max-h-80 overflow-y-auto">
                   {alerts.slice(0, 8).map((alert: any, i: number) => (
@@ -870,6 +874,7 @@ function App() {
                 <div className="flex items-center gap-3 mb-4">
                   <Shield className="w-5 h-5 text-blue-400" />
                   <h3 className="font-semibold text-white">Budget Guardrails</h3>
+                  {stats?.data_source === 'azure_live' && <span className="px-2 py-0.5 rounded text-xs bg-yellow-500/20 text-yellow-400">DEMO</span>}
                 </div>
                 <div className="space-y-3">
                   {budgets.map((budget: any, i: number) => (
@@ -1097,19 +1102,31 @@ function App() {
               <div className="col-span-2 bg-slate-900 rounded-xl border border-slate-800 p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3"><Activity className="w-5 h-5 text-red-400" /><h3 className="font-semibold text-white">Real-Time Anomaly Detection</h3></div>
-                  <span className="px-3 py-1 bg-green-500/20 text-green-400 text-xs font-medium rounded-full">ML Model Active</span>
+                  {stats?.data_source === 'azure_live' ? (
+                    <span className="px-3 py-1 bg-blue-500/20 text-blue-400 text-xs font-medium rounded-full">Live Azure Data</span>
+                  ) : (
+                    <span className="px-3 py-1 bg-green-500/20 text-green-400 text-xs font-medium rounded-full">ML Model Active</span>
+                  )}
                 </div>
-                <ResponsiveContainer width="100%" height={250}>
-                  <ComposedChart data={anomalyData}>
-                    <defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.3}/><stop offset="100%" stopColor="#10b981" stopOpacity={0.05}/></linearGradient></defs>
-                    <XAxis dataKey="date" stroke="#475569" fontSize={11} />
-                    <YAxis stroke="#475569" fontSize={11} tickFormatter={(v) => `$${(v/1000).toFixed(1)}K`} />
-                    <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
-                    <Area type="monotone" dataKey="expected" stroke="none" fill="url(#ag)" />
-                    <Line type="monotone" dataKey="expected" stroke="#10b981" strokeDasharray="5 5" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="actual" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 4 }} />
-                  </ComposedChart>
-                </ResponsiveContainer>
+                {stats?.data_source === 'azure_live' || anomalyData.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-[250px] text-slate-500">
+                    <Activity className="w-12 h-12 mb-3 opacity-50" />
+                    <p className="text-sm">No anomaly data available</p>
+                    <p className="text-xs mt-1">Cost anomaly detection requires historical data</p>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={250}>
+                    <ComposedChart data={anomalyData}>
+                      <defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.3}/><stop offset="100%" stopColor="#10b981" stopOpacity={0.05}/></linearGradient></defs>
+                      <XAxis dataKey="date" stroke="#475569" fontSize={11} />
+                      <YAxis stroke="#475569" fontSize={11} tickFormatter={(v) => `$${(v/1000).toFixed(1)}K`} />
+                      <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+                      <Area type="monotone" dataKey="expected" stroke="none" fill="url(#ag)" />
+                      <Line type="monotone" dataKey="expected" stroke="#10b981" strokeDasharray="5 5" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="actual" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 4 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                )}
                 <div className="mt-4 space-y-2">
                     {alerts.slice(0, 2).map((a: any, i: number) => (
                       <div key={i} onClick={() => openAlertWorkflow(a)} className="flex items-center justify-between bg-slate-800/50 rounded-lg p-3 cursor-pointer hover:bg-slate-700/50 transition-colors">
