@@ -45,7 +45,7 @@ async def call_gpt5_api(user_message: str, context: str = "") -> str:
         "api-key": GPT5_API_KEY,
     }
     
-    system_prompt = f"""You are Azure FinOps Copilot for AdventHealth. You help analyze Azure costs, anomalies, and provide RI/SP recommendations.
+    system_prompt = f"""You are Azure FinOps Copilot for HealthCo. You help analyze Azure costs, anomalies, and provide RI/SP recommendations.
 
 Current Context:
 {context}
@@ -221,7 +221,7 @@ async def seed_data(db):
     
     now = datetime.utcnow().isoformat()
     
-    # Budget data - Based on AdventHealth December 2025 MBR
+    # Budget data - Based on HealthCo December 2025 MBR
     # 4 healthy (green), 1 warning (yellow), 1 critical (red) - showing 98% healthy
     budgets = [
         ("budget-compute", "Compute (ADC VMs)", 172000, 210000, 185000, "critical"),  # 82% - critical (red) - compute overrun
@@ -548,7 +548,7 @@ async def get_stats():
         cursor = await db.execute("SELECT SUM(monthly_savings) FROM hidden_costs")
         hidden_mitigated = (await cursor.fetchone())[0] or 0
         
-        # AdventHealth December 2025 MBR data
+        # HealthCo December 2025 MBR data
         # Daily Rate: $19.6K (+22% YoY), YTD ACR: $2.83M, MACC Goal: $20.3M
         return {
             "monthly_spend": 588000,  # $19.6K daily * 30 days
@@ -878,16 +878,16 @@ async def get_recommendations():
         ''')
         rows = await cursor.fetchall()
         
-        # Pricing structure for AdventHealth:
+        # Pricing structure for AdventHHealthCoealth:
         # 1. MSRP (List Price) - Azure retail price
-        # 2. EA Price = MSRP - 12% (AdventHealth Enterprise Agreement discount)
+        # 2. EA Price = MSRP - 12% (HealthCo Enterprise Agreement discount)
         # 3. RI/SP discounts are applied ON TOP of EA price:
         #    - 1-Year RI: 36% off EA price
         #    - 3-Year RI: 56% off EA price
         #    - 1-Year SP: 33% off EA price
         #    - 3-Year SP: 52% off EA price
         
-        EA_DISCOUNT = 0.12  # AdventHealth's 12% Enterprise Agreement discount
+        EA_DISCOUNT = 0.12  # HealthCo's 12% Enterprise Agreement discount
         
         recommendations = []
         for row in rows:
@@ -1151,7 +1151,7 @@ Based on 90 days of telemetry, SQL-Prod-Primary shows exceptional stability:
 Validated by Recommendation Validator with 97.8% confidence."""
 
     elif "ri" in user_msg or "coverage" in user_msg or "reserved" in user_msg:
-        response = """RI/SP Coverage Analysis (AdventHealth)
+        response = """RI/SP Coverage Analysis (HealthCo)
 
 Current State:
   - RI Coverage: 4% (significantly below best practice)
@@ -1192,7 +1192,7 @@ Validated by Commitment Advisor and Recommendation Validator agents."""
         warning = [b for b in budgets_data if 80 <= b.get('percentage', 0) < 90]
         healthy = [b for b in budgets_data if b.get('percentage', 0) < 80]
         
-        response = f"""Budget Health Summary (AdventHealth December 2025)
+        response = f"""Budget Health Summary (HealthCo December 2025)
 
 Budget Status:
 {budget_table}
@@ -1203,7 +1203,7 @@ Alerts:
   - Critical (>90%): {len(critical)} budgets
   - Warning (>80%): {len(warning)} budgets
 
-AdventHealth MBR Metrics:
+HealthCo MBR Metrics:
   - Daily Rate: $19.6K (+22% YoY)
   - YTD ACR: $2.83M
   - MACC Goal: $20.3M (24.5% progress)
@@ -1211,7 +1211,7 @@ AdventHealth MBR Metrics:
 
     elif "saving" in user_msg or "cost" in user_msg:
         resolved_savings = sum(a['cost_impact'] or 0 for a in anomalies if a['status'] == 'resolved')
-        response = f"""Cost Savings Summary (AdventHealth)
+        response = f"""Cost Savings Summary (HealthCo)
 
 Monthly AI-Identified Savings: $20,000
 Today's Savings Achieved: $1,500
@@ -1232,7 +1232,7 @@ Total AI-identified savings: $20,000/month"""
 
     else:
         # Try to call live Claude API for general questions
-        context = f"""AdventHealth December 2025 MBR Data:
+        context = f"""HealthCo December 2025 MBR Data:
 - Monthly Azure Cost: $588K ($19.6K daily rate)
 - YTD ACR: $2.83M
 - RI Coverage: 4% (Target: 25%)
@@ -1248,7 +1248,7 @@ Total AI-identified savings: $20,000/month"""
             # Fallback if GPT-5 API fails
             resolved_count = len([a for a in anomalies if a['status'] == 'resolved'])
             total_count = len([a for a in anomalies if a['status'] != 'dismissed'])
-            response = f"""AdventHealth FinOps AI Assistant (GPT-5)
+            response = f"""HealthCo FinOps AI Assistant (GPT-5)
 
 I have access to your Azure subscription data and can answer questions about:
 
@@ -1303,8 +1303,8 @@ async def test_azure_connection():
     return {
         "success": True,
         "message": "Successfully connected to Azure",
-        "tenant_name": "AdventHealth Production",
-        "subscription_name": "AH-Production-001"
+        "tenant_name": "HealthCo Production",
+        "subscription_name": "HO-Production-001"
     }
 
 @app.post("/api/azure-config/discover")

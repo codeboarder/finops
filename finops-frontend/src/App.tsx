@@ -224,7 +224,7 @@ function App() {
 
   const getOwnerEmail = (alert: any) => {
     const resource = (alert?.resource || 'unknown').toLowerCase().replace(/[^a-z0-9]/g, '-')
-    return `${resource}-owner@adventhealth.org`
+    return `${resource}-owner@emaildomain.org`
   }
 
   const handleAlertAction = async (action: string) => {
