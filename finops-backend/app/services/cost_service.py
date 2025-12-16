@@ -56,13 +56,30 @@ class CostService:
         )
         
         # Parse response into clean format
+        # Azure returns columns in order: ['Cost', 'UsageDate', 'Currency']
         costs = []
         if result.rows:
             for row in result.rows:
+                # Column order: Cost (index 0), UsageDate (index 1), Currency (index 2)
+                cost_val = float(row[0]) if row[0] is not None else 0.0
+                date_val = row[1]
+                currency = row[2] if len(row) > 2 else "USD"
+                
+                # Handle different date formats from Azure API
+                if isinstance(date_val, str):
+                    date_str = date_val
+                elif hasattr(date_val, 'isoformat'):
+                    date_str = date_val.isoformat()
+                elif isinstance(date_val, (int, float)):
+                    # Azure returns dates as numeric values (YYYYMMDD format)
+                    date_str = str(int(date_val))
+                else:
+                    date_str = str(date_val)
+                
                 costs.append({
-                    "date": row[0] if isinstance(row[0], str) else row[0].isoformat(),
-                    "cost": float(row[1]),
-                    "currency": row[2] if len(row) > 2 else "USD"
+                    "date": date_str,
+                    "cost": cost_val,
+                    "currency": currency
                 })
         
         return costs
