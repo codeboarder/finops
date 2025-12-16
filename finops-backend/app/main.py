@@ -1347,6 +1347,10 @@ async def get_forecast():
 # Anomaly detection data for chart
 @app.get("/api/anomaly-data")
 async def get_anomaly_data():
+    # Return empty array when Azure is connected - no mock data
+    if is_azure_configured():
+        return []
+    
     data = []
     base = 8500
     for i in range(12):
@@ -1647,6 +1651,22 @@ All recommendations are validated by secondary AI agents for accuracy."""
 # Azure Configuration endpoints
 @app.get("/api/azure-config")
 async def get_azure_config():
+    # Check if Azure is configured via environment variables
+    if is_azure_configured():
+        tenant_id = os.getenv("AZURE_TENANT_ID", "")
+        client_id = os.getenv("AZURE_CLIENT_ID", "")
+        subscription_id = os.getenv("AZURE_SUBSCRIPTION_ID", "")
+        return {
+            "configured": True,
+            "tenant_id": tenant_id[:8] + "..." if tenant_id else "",
+            "client_id": client_id[:8] + "..." if client_id else "",
+            "subscription_id": subscription_id[:8] + "..." if subscription_id else "",
+            "has_secret": bool(os.getenv("AZURE_CLIENT_SECRET")),
+            "last_discovery": azure_config_store.get("last_discovery"),
+            "resources_discovered": azure_config_store.get("resources_discovered", 0),
+            "source": "environment"
+        }
+    # Check if configured via UI
     if azure_config_store:
         return {
             "configured": True,
@@ -1655,7 +1675,8 @@ async def get_azure_config():
             "subscription_id": azure_config_store.get("subscription_id", "")[:8] + "..." if azure_config_store.get("subscription_id") else "",
             "has_secret": bool(azure_config_store.get("client_secret")),
             "last_discovery": azure_config_store.get("last_discovery"),
-            "resources_discovered": azure_config_store.get("resources_discovered", 0)
+            "resources_discovered": azure_config_store.get("resources_discovered", 0),
+            "source": "ui"
         }
     return {"configured": False}
 

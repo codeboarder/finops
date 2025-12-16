@@ -1102,19 +1102,31 @@ function App() {
               <div className="col-span-2 bg-slate-900 rounded-xl border border-slate-800 p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3"><Activity className="w-5 h-5 text-red-400" /><h3 className="font-semibold text-white">Real-Time Anomaly Detection</h3></div>
-                  <span className="px-3 py-1 bg-green-500/20 text-green-400 text-xs font-medium rounded-full">ML Model Active</span>
+                  {stats?.data_source === 'azure_live' ? (
+                    <span className="px-3 py-1 bg-blue-500/20 text-blue-400 text-xs font-medium rounded-full">Live Azure Data</span>
+                  ) : (
+                    <span className="px-3 py-1 bg-green-500/20 text-green-400 text-xs font-medium rounded-full">ML Model Active</span>
+                  )}
                 </div>
-                <ResponsiveContainer width="100%" height={250}>
-                  <ComposedChart data={anomalyData}>
-                    <defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.3}/><stop offset="100%" stopColor="#10b981" stopOpacity={0.05}/></linearGradient></defs>
-                    <XAxis dataKey="date" stroke="#475569" fontSize={11} />
-                    <YAxis stroke="#475569" fontSize={11} tickFormatter={(v) => `$${(v/1000).toFixed(1)}K`} />
-                    <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
-                    <Area type="monotone" dataKey="expected" stroke="none" fill="url(#ag)" />
-                    <Line type="monotone" dataKey="expected" stroke="#10b981" strokeDasharray="5 5" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="actual" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 4 }} />
-                  </ComposedChart>
-                </ResponsiveContainer>
+                {stats?.data_source === 'azure_live' || anomalyData.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-[250px] text-slate-500">
+                    <Activity className="w-12 h-12 mb-3 opacity-50" />
+                    <p className="text-sm">No anomaly data available</p>
+                    <p className="text-xs mt-1">Cost anomaly detection requires historical data</p>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={250}>
+                    <ComposedChart data={anomalyData}>
+                      <defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#10b981" stopOpacity={0.3}/><stop offset="100%" stopColor="#10b981" stopOpacity={0.05}/></linearGradient></defs>
+                      <XAxis dataKey="date" stroke="#475569" fontSize={11} />
+                      <YAxis stroke="#475569" fontSize={11} tickFormatter={(v) => `$${(v/1000).toFixed(1)}K`} />
+                      <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+                      <Area type="monotone" dataKey="expected" stroke="none" fill="url(#ag)" />
+                      <Line type="monotone" dataKey="expected" stroke="#10b981" strokeDasharray="5 5" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="actual" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 4 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                )}
                 <div className="mt-4 space-y-2">
                     {alerts.slice(0, 2).map((a: any, i: number) => (
                       <div key={i} onClick={() => openAlertWorkflow(a)} className="flex items-center justify-between bg-slate-800/50 rounded-lg p-3 cursor-pointer hover:bg-slate-700/50 transition-colors">

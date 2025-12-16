@@ -206,3 +206,35 @@ class CostService:
             "currency": "USD",
             "last_updated": now.isoformat()
         }
+    
+    def get_cost_summary(self) -> Dict[str, Any]:
+        """
+        Get cost summary for discovery - monthly spend and AI savings.
+        """
+        try:
+            summary = self.get_monthly_summary()
+            
+            # Get AI savings from advisor recommendations
+            from .recommendation_service import RecommendationService
+            rec_service = RecommendationService(
+                self.azure.tenant_id,
+                self.azure.client_id, 
+                self.azure.client_secret,
+                self.azure.subscription_id
+            )
+            ai_savings = rec_service.get_total_savings()
+            
+            return {
+                "monthly_spend": summary.get("mtd_cost", 0),
+                "ai_savings": ai_savings,
+                "daily_average": summary.get("daily_average", 0),
+                "forecast": summary.get("forecast", 0)
+            }
+        except Exception as e:
+            print(f"Error getting cost summary: {e}")
+            return {
+                "monthly_spend": 0,
+                "ai_savings": 0,
+                "daily_average": 0,
+                "forecast": 0
+            }
