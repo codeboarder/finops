@@ -1041,6 +1041,10 @@ async def get_mission_critical():
 # AI Agents - diversified with primary and validator agents
 @app.get("/api/agents")
 async def get_agents():
+    # Return empty array when Azure is connected - no mock data
+    if is_azure_configured():
+        return []
+    
     agents = [
         # Primary Agents
         {
@@ -1731,34 +1735,38 @@ async def test_azure_connection():
 
 @app.post("/api/azure-config/discover")
 async def discover_azure_resources():
-    if not azure_config_store.get("tenant_id"):
+    if not is_azure_configured():
         return {"success": False, "message": "No Azure configuration found"}
     
-    # Simulated discovery - in production would use Azure Resource Graph
-    await asyncio.sleep(2)  # Simulate discovery
-    azure_config_store["last_discovery"] = datetime.utcnow().isoformat()
-    azure_config_store["resources_discovered"] = 156
-    
-    return {
-        "success": True,
-        "message": "Discovery completed",
-        "summary": {
-            "virtual_machines": 47,
-            "sql_databases": 12,
-            "storage_accounts": 28,
-            "kubernetes_clusters": 3,
-            "app_services": 18,
-            "networking": 34,
-            "other": 14,
-            "total": 156
-        },
-        "cost_summary": {
-            "monthly_spend": 248000,
-            "potential_savings": 89000,
-            "ri_coverage": 35,
-            "sp_coverage": 25
+    try:
+        from .services.azure_client import AzureClientManager
+        from .services.cost_service import CostService
+        
+        # Get real Azure resources
+        azure_client = AzureClientManager()
+        resource_summary = azure_client.list_resources()
+        
+        # Get real cost data
+        cost_service = CostService()
+        cost_summary = cost_service.get_cost_summary()
+        
+        azure_config_store["last_discovery"] = datetime.utcnow().isoformat()
+        azure_config_store["resources_discovered"] = resource_summary.get("total", 0)
+        
+        return {
+            "success": True,
+            "message": "Discovery completed",
+            "summary": resource_summary,
+            "cost_summary": {
+                "monthly_spend": cost_summary.get("monthly_spend", 0),
+                "potential_savings": cost_summary.get("ai_savings", 0),
+                "ri_coverage": 0,  # No RIs configured
+                "sp_coverage": 0   # No SPs configured
+            }
         }
-    }
+    except Exception as e:
+        print(f"Discovery error: {e}")
+        return {"success": False, "message": f"Discovery failed: {str(e)}"}
 
 # Control configuration storage
 control_settings = {

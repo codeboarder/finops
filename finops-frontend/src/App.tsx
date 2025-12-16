@@ -823,10 +823,10 @@ function App() {
               {[
                 { label: 'MONTHLY AZURE COST', value: fmt(stats.monthly_spend), sub: `${fmt(stats.monthly_spend / 30)} daily rate`, icon: TrendingUp, color: 'blue' },
                 { label: 'MONTHLY SAVINGS', value: fmt(stats.ai_savings), change: stats.data_source === 'azure_live' ? 'Live Azure Data' : '+$127K vs last month', icon: DollarSign, color: 'green' },
-                { label: 'ANOMALIES RESOLVED', value: `${alerts.filter((a: any) => a.status === 'auto-resolved' || a.status === 'owner-notified').length}/${alerts.length}`, sub: 'This month', icon: CheckCircle, color: 'blue' },
-                { label: 'BUDGET STATUS', value: 'ON TRACK', sub: `${budgets.filter((b: any) => b.threshold_status === 'healthy' || b.threshold_status === 'info').length}/${budgets.length} budgets on track`, icon: Shield, color: 'green' },
+                                { label: 'ANOMALIES RESOLVED', value: stats?.data_source === 'azure_live' ? 'N/A' : `${alerts.filter((a: any) => a.status === 'auto-resolved' || a.status === 'owner-notified').length}/${alerts.length}`, sub: stats?.data_source === 'azure_live' ? 'No anomaly data' : 'This month', icon: CheckCircle, color: 'blue' },
+                                { label: 'BUDGET STATUS', value: stats?.data_source === 'azure_live' ? 'N/A' : 'ON TRACK', sub: stats?.data_source === 'azure_live' ? 'No budget data' : `${budgets.filter((b: any) => b.threshold_status === 'healthy' || b.threshold_status === 'info').length}/${budgets.length} budgets on track`, icon: Shield, color: 'green' },
                 { label: 'RI COVERAGE', value: `${stats.ri_coverage}%`, sub: `Target: ${stats.target_coverage}%`, icon: Target, color: stats.ri_coverage >= stats.target_coverage ? 'green' : 'yellow' },
-                { label: 'AGENT SAVINGS', value: fmt(agents.reduce((sum: number, a: any) => sum + (a.savings_identified || 0), 0)), sub: `${agents.length} agents active`, icon: Bot, color: 'purple' },
+                { label: 'AGENT SAVINGS', value: stats?.data_source === 'azure_live' ? fmt(stats.ai_savings || 0) : fmt(agents.reduce((sum: number, a: any) => sum + (a.savings_identified || 0), 0)), sub: stats?.data_source === 'azure_live' ? 'From Azure recommendations' : `${agents.length} agents active`, icon: Bot, color: 'purple' },
               ].map((s, i) => (
                 <div key={i} className={`rounded-xl border p-5 bg-slate-900 border-slate-800`}>
                   <div className="flex items-center justify-between mb-2">
