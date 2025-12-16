@@ -111,40 +111,48 @@ function App() {
     } catch (e) { console.error(e) }
   }, [isLive])
 
-    const showAlertToast = (alert: any) => {
-      const severityColors = alert.severity === 'critical' 
-        ? 'border-red-500/40 bg-red-500/10' 
-        : alert.severity === 'high' 
-        ? 'border-yellow-500/40 bg-yellow-500/10' 
-        : 'border-blue-500/40 bg-blue-500/10'
-      const iconColor = alert.severity === 'critical' ? 'text-red-400' : alert.severity === 'high' ? 'text-yellow-400' : 'text-blue-400'
-      
-      toast.custom((id) => (
-        <button
-          onClick={() => {
-            openAlertWorkflow(alert)
-            toast.dismiss(id)
-          }}
-          className={`flex w-full items-start gap-3 rounded-lg border px-4 py-3 text-left hover:bg-slate-700 transition-colors cursor-pointer ${severityColors}`}
-        >
-          <AlertTriangle className={`mt-0.5 h-4 w-4 flex-shrink-0 ${iconColor}`} />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-white">{alert.message}</p>
-            <p className="text-xs text-slate-400">{alert.resource} | {alert.delta}</p>
-          </div>
-          <span className="text-xs text-slate-500 whitespace-nowrap">Click to investigate</span>
-        </button>
-      ), { duration: 8000 })
-    }
+  const openAlertWorkflow = useCallback((alert: any) => {
+    setSelectedAlert(alert)
+    setAlertModalOpen(true)
+    setWorkflowStep(0)
+    setInvestigationRunning(false)
+    setEmailStage('idle')
+  }, [])
 
-    const generateDemoAlert = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/alerts/generate-demo`, { method: 'POST' })
-        const newAlert = await res.json()
-        setAlerts(prev => [newAlert, ...prev])
-        showAlertToast(newAlert)
-      } catch (e) { console.error(e) }
-    }
+  const showAlertToast = useCallback((alert: any) => {
+    const severityColors = alert.severity === 'critical' 
+      ? 'border-red-500/40 bg-red-500/10' 
+      : alert.severity === 'high' 
+      ? 'border-yellow-500/40 bg-yellow-500/10' 
+      : 'border-blue-500/40 bg-blue-500/10'
+    const iconColor = alert.severity === 'critical' ? 'text-red-400' : alert.severity === 'high' ? 'text-yellow-400' : 'text-blue-400'
+    
+    toast.custom((id) => (
+      <button
+        onClick={() => {
+          openAlertWorkflow(alert)
+          toast.dismiss(id)
+        }}
+        className={`flex w-full items-start gap-3 rounded-lg border px-4 py-3 text-left hover:bg-slate-700 transition-colors cursor-pointer ${severityColors}`}
+      >
+        <AlertTriangle className={`mt-0.5 h-4 w-4 flex-shrink-0 ${iconColor}`} />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-white">{alert.message}</p>
+          <p className="text-xs text-slate-400">{alert.resource} | {alert.delta}</p>
+        </div>
+        <span className="text-xs text-slate-500 whitespace-nowrap">Click to investigate</span>
+      </button>
+    ), { duration: 8000 })
+  }, [openAlertWorkflow])
+
+  const generateDemoAlert = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/alerts/generate-demo`, { method: 'POST' })
+      const newAlert = await res.json()
+      setAlerts(prev => [newAlert, ...prev])
+      showAlertToast(newAlert)
+    } catch (e) { console.error(e) }
+  }, [showAlertToast])
 
   const handleChat = async () => {
     if (!chatInput.trim()) return
@@ -170,13 +178,6 @@ function App() {
     return () => { clearInterval(d); clearInterval(t); clearInterval(c); clearTimeout(a); clearInterval(alertInterval) }
   }, [fetchData, generateDemoAlert, simulateTick])
 
-  const openAlertWorkflow = (alert: any) => {
-    setSelectedAlert(alert)
-    setAlertModalOpen(true)
-    setWorkflowStep(0)
-    setInvestigationRunning(false)
-    setEmailStage('idle')
-  }
 
   const getRecommendationsForAlert = (alert: any) => {
     const msg = (alert?.message || '').toLowerCase()
