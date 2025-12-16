@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useCallback } from 'react'
 import './App.css'
@@ -255,10 +256,10 @@ function App() {
 
   useEffect(() => {
     fetchData()
-    const d = setInterval(fetchData, 30000)
-    const t = setInterval(simulateTick, 3000)
+    const d = setInterval(fetchData, 300000)
+    const t = setInterval(simulateTick, 30000)
     const c = setInterval(() => setCurrentTime(new Date()), 1000)
-    const a = setTimeout(generateDemoAlert, 5000)
+    const a = setTimeout(generateDemoAlert, 500)
     const alertInterval = setInterval(generateDemoAlert, 60000) // Generate alert every 60 seconds
     return () => { clearInterval(d); clearInterval(t); clearInterval(c); clearTimeout(a); clearInterval(alertInterval) }
   }, [fetchData, generateDemoAlert, simulateTick])
@@ -415,7 +416,7 @@ function App() {
     const runDiscovery = async () => {
       setIsDiscovering(true)
       try {
-        const res = await fetch(`${API_URL}/api/azure-config/discover`, { method: 'POST' })
+        const res = await fetch(`${API_URL}/api/azure-config/discover_prod`, { method: 'POST' })
         const data = await res.json()
         if (data.success) {
           setDiscoveryResult(data)

@@ -12,6 +12,12 @@ import httpx
 import os
 from dotenv import load_dotenv
 
+#Added for prod resource graph queries
+from azure.identity import DefaultAzureCredential, ClientSecretCredential
+from azure.mgmt.resourcegraph import ResourceGraphClient
+from azure.mgmt.resourcegraph.models import QueryRequest
+
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -178,6 +184,7 @@ class AzureConfig(BaseModel):
     tenant_id: str
     client_id: str
     client_secret: str
+    subscription_id: Optional[str] = None
 
 # Pydantic models for offline data import
 class OfflineRIRecommendation(BaseModel):
@@ -1538,11 +1545,7 @@ Total AI-identified savings: $20,000/month"""
             # Fallback if GPT-5 API fails
             resolved_count = len([a for a in anomalies if a['status'] == 'resolved'])
             total_count = len([a for a in anomalies if a['status'] != 'dismissed'])
-            response = f"""HealthCo FinOps AI Assistant (GPT-5)
-        # Generic fallback for unmatched queries (GPT-5 already tried at start)
-        resolved_count = len([a for a in anomalies if a['status'] == 'resolved'])
-        total_count = len([a for a in anomalies if a['status'] != 'dismissed'])
-        response = f"""ContosoHealth FinOps AI Assistant
+            response = f"""ContosoHealth FinOps AI Assistant
 
 I can help you with Azure cost management questions:
 
@@ -1677,6 +1680,94 @@ async def discover_azure_resources():
             "other": 14,
             "total": 156
         },
+        "cost_summary": {
+            "monthly_spend": 248000,
+            "potential_savings": 89000,
+            "ri_coverage": 35,
+            "sp_coverage": 25
+        }
+    }
+
+@app.post("/api/azure-config/discover_prod")
+async def discover_azure_resources_prod():
+    """Query all provisioned resources for a subscription via Resource Graph."""
+    if not all([
+        azure_config_store.get("tenant_id"),
+        azure_config_store.get("client_id"),
+        azure_config_store.get("client_secret"),
+    ]):
+        raise ValueError("Azure app registration (tenant_id, client_id, client_secret) not configured")
+
+    credential = ClientSecretCredential(
+        tenant_id=azure_config_store["tenant_id"],
+        client_id=azure_config_store["client_id"],
+        client_secret=azure_config_store["client_secret"],
+    )
+    subscription_id = azure_config_store["subscription_id"]
+    client = ResourceGraphClient(credential)
+    
+    query = """
+    Resources
+    | summarize resourceCount = count() by type
+    | order by resourceCount desc
+    """
+    request = QueryRequest(
+        subscriptions=[subscription_id],
+        query=query,
+    )
+    
+    result = client.resources(request)
+    # result.data is iterable; convert to plain dicts
+    # return [dict(r) for r in result.data]
+    # Build summary buckets from result.data
+    summary = {
+        "virtual_machines": 0,
+        "sql_databases": 0,
+        "storage_accounts": 0,
+        "kubernetes_clusters": 0,
+        "app_services": 0,
+        "networking": 0,
+        "other": 0,
+        "total": 0,
+    }
+
+    for row in result.data:
+        r = dict(row)
+        t = str(r.get("type", "")).lower()
+        count = int(r.get("resourceCount", 0) or 0)
+
+        if "microsoft.compute/virtualmachines" in t:
+            summary["virtual_machines"] += count
+        elif t.startswith("microsoft.sql/"):
+            summary["sql_databases"] += count
+        elif t.startswith("microsoft.storage/"):
+            summary["storage_accounts"] += count
+        elif t.startswith("microsoft.containerservice/"):
+            summary["kubernetes_clusters"] += count
+        elif t.startswith("microsoft.web/"):
+            summary["app_services"] += count
+        elif t.startswith("microsoft.network/"):
+            summary["networking"] += count
+        else:
+            summary["other"] += count
+
+        summary["total"] += count
+    
+    # Track discovery metadata
+    azure_config_store["last_discovery"] = datetime.utcnow().isoformat()
+    azure_config_store["resources_discovered"] = summary["total"]
+
+    return {
+        "success": True,
+        "message": "Discovery completed",
+        "summary": summary,
+        "cost_summary": {
+            # These are still simulated; wire to real cost data if desired
+            "monthly_spend": 248000,
+            "potential_savings": 89000,
+            "ri_coverage": 35,
+            "sp_coverage": 25
+        }, # cost summary is fake.....
         "cost_summary": {
             "monthly_spend": 248000,
             "potential_savings": 89000,
