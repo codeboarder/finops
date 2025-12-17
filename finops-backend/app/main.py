@@ -1815,19 +1815,16 @@ async def discover_azure_resources():
 @app.post("/api/azure-config/discover_prod")
 async def discover_azure_resources_prod():
     """Query all provisioned resources for a subscription via Resource Graph."""
-    if not all([
-        azure_config_store.get("tenant_id"),
-        azure_config_store.get("client_id"),
-        azure_config_store.get("client_secret"),
-    ]):
-        raise ValueError("Azure app registration (tenant_id, client_id, client_secret) not configured")
+    if not is_azure_configured():
+        return {"success": False, "message": "No Azure configuration found"}
 
+    from .services.azure_client import AzureClientManager
     credential = ClientSecretCredential(
-        tenant_id=azure_config_store["tenant_id"],
-        client_id=azure_config_store["client_id"],
-        client_secret=azure_config_store["client_secret"],
+        tenant_id=os.getenv("AZURE_TENANT_ID"),
+        client_id=os.getenv("AZURE_CLIENT_ID"),
+        client_secret=os.getenv("AZURE_CLIENT_SECRET"),
     )
-    subscription_id = azure_config_store["subscription_id"]
+    subscription_id = os.getenv("AZURE_SUBSCRIPTION_ID")
     client = ResourceGraphClient(credential)
     
     query = """
@@ -1887,12 +1884,6 @@ async def discover_azure_resources_prod():
         "summary": summary,
         "cost_summary": {
             # These are still simulated; wire to real cost data if desired
-            "monthly_spend": 248000,
-            "potential_savings": 89000,
-            "ri_coverage": 35,
-            "sp_coverage": 25
-        }, # cost summary is fake.....
-        "cost_summary": {
             "monthly_spend": 248000,
             "potential_savings": 89000,
             "ri_coverage": 35,
